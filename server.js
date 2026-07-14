@@ -10,7 +10,7 @@ const port = 3000;
 const IMDB_SUGGEST_URL = 'https://v3.sg.media-imdb.com/suggestion/x';
 const TV_TYPES = new Set(['tvSeries', 'tvMiniSeries', 'movie']); // Including movies for better utility
 
-app.use(express.static('public'));
+app.use(express.static(path.join(__dirname, 'dist')));
 app.use(express.json());
 
 // Helper functions ported from TS
@@ -137,7 +137,6 @@ async function ensureTmdbKey() {
     try {
         const keys = await freekeys();
         tmdbApiKey = keys.tmdb_key;
-        console.log('[TMDB] Using free API key from freekeys');
     } catch (e) {
         console.warn('[TMDB] Failed to fetch free API key:', e.message);
     }

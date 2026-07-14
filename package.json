@@ -4,6 +4,8 @@
   "description": "",
   "main": "index.js",
   "scripts": {
+    "dev": "concurrently -k \"node server.js\" \"vite\"",
+    "build": "vite build",
     "start": "node server.js",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
@@ -12,8 +14,12 @@
   "license": "ISC",
   "type": "commonjs",
   "dependencies": {
+    "concurrently": "^10.0.3",
     "express": "^5.2.1",
     "freekeys": "^0.0.4",
-    "node-cache": "^5.1.2"
+    "node-cache": "^5.1.2",
+    "preact": "^10.29.7",
+    "vite": "^8.1.4",
+    "zimmerframe": "^1.1.4"
   }
 }
