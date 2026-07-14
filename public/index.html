@@ -3,7 +3,8 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>StreamVault</title>
+    <title>cine-web</title>
+    <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
     <style>
         :root {
             --primary: #2563eb;
@@ -29,9 +30,7 @@
             text-align: center;
             font-size: 2.5rem;
             margin-bottom: 2rem;
-            background: linear-gradient(to right, #60a5fa, #2563eb);
-            -webkit-background-clip: text;
-            -webkit-text-fill-color: transparent;
+            color: var(--primary);
         }
 
         /* Search Section */
@@ -43,7 +42,6 @@
             padding: 8px;
             border-radius: 12px;
             border: 1px solid var(--border);
-            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
         }
 
         #search-input {
@@ -64,12 +62,9 @@
             border-radius: 8px;
             cursor: pointer;
             font-weight: 600;
-            transition: background 0.2s;
         }
 
-        #search-button:hover {
-            background: var(--primary-hover);
-        }
+        #search-button:hover { background: var(--primary-hover); }
 
         /* Player Section */
         #player-container {
@@ -79,12 +74,6 @@
             padding: 20px;
             border-radius: 16px;
             border: 1px solid var(--border);
-            animation: fadeIn 0.3s ease-out;
-        }
-
-        @keyframes fadeIn {
-            from { opacity: 0; transform: translateY(10px); }
-            to { opacity: 1; transform: translateY(0); }
         }
 
         .player-header {
@@ -99,12 +88,9 @@
             padding: 8px;
             border-radius: 50%;
             background: rgba(255, 255, 255, 0.1);
-            transition: background 0.2s;
         }
 
-        .close-player:hover {
-            background: rgba(255, 255, 255, 0.2);
-        }
+        .close-player:hover { background: rgba(255, 255, 255, 0.2); }
 
         .controls {
             display: flex;
@@ -142,7 +128,6 @@
             border: none;
             background: #000;
             border-radius: 8px;
-            box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.4);
         }
 
         /* Results Grid */
@@ -157,14 +142,11 @@
             border-radius: 12px;
             overflow: hidden;
             cursor: pointer;
-            transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
             border: 1px solid var(--border);
         }
 
         .result-item:hover {
-            transform: translateY(-8px);
             border-color: var(--primary);
-            box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.3);
         }
 
         .result-item img {
@@ -209,29 +191,285 @@
             color: var(--text-muted);
             margin: 20px 0;
         }
+
+        #quality-select {
+            background: var(--bg);
+            border: 1px solid var(--border);
+            color: var(--text);
+            padding: 8px 12px;
+            border-radius: 6px;
+            outline: none;
+        }
+
+        /* Custom Video Controls */
+        .video-wrapper {
+            position: relative;
+            width: 100%;
+            aspect-ratio: 16/9;
+            background: #000;
+            border-radius: 8px;
+            overflow: hidden;
+        }
+
+        .video-wrapper video {
+            width: 100%;
+            height: 100%;
+            display: block;
+        }
+
+        .video-wrapper video::cue {
+            font-size: var(--subtitle-size, 1.2em);
+            background: rgba(0,0,0,0.7);
+            color: #fff;
+        }
+
+        #center-play {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            font-size: 4rem;
+            color: rgba(255,255,255,0.85);
+            cursor: pointer;
+            pointer-events: none;
+            line-height: 1;
+        }
+
+        #custom-controls {
+            display: none;
+            position: absolute;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            background: rgba(0,0,0,0.8);
+            padding: 40px 12px 10px;
+        }
+
+        .video-wrapper.show-controls #custom-controls {
+            display: block;
+        }
+
+        .video-wrapper.show-controls #center-play {
+            pointer-events: auto;
+        }
+
+        .progress-container {
+            width: 100%;
+            height: 20px;
+            position: relative;
+            cursor: pointer;
+        }
+
+        .progress-container .track {
+            position: absolute;
+            top: 50%;
+            left: 0;
+            right: 0;
+            transform: translateY(-50%);
+            height: 5px;
+            background: rgba(255,255,255,0.15);
+            border-radius: 2px;
+        }
+
+        .progress-container .buffer {
+            position: absolute;
+            top: 50%;
+            left: 0;
+            transform: translateY(-50%);
+            height: 5px;
+            background: rgba(255,255,255,0.25);
+            border-radius: 2px;
+        }
+
+        .progress-container .played {
+            position: absolute;
+            top: 50%;
+            left: 0;
+            transform: translateY(-50%);
+            height: 5px;
+            background: var(--primary);
+            border-radius: 2px;
+        }
+
+        .progress-container .thumb {
+            position: absolute;
+            top: 50%;
+            left: 0;
+            transform: translate(-50%, -50%);
+            width: 12px;
+            height: 12px;
+            background: var(--primary);
+            border-radius: 50%;
+        }
+
+        .controls-row {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-top: 2px;
+        }
+
+        .control-btn {
+            background: none;
+            border: none;
+            color: #fff;
+            cursor: pointer;
+            padding: 4px 6px;
+            font-size: 1rem;
+            border-radius: 3px;
+            font-family: inherit;
+        }
+
+        .control-btn:hover { background: rgba(255,255,255,0.15); }
+
+        #time-display {
+            font-size: 0.8rem;
+            color: #ccc;
+            font-variant-numeric: tabular-nums;
+            white-space: nowrap;
+        }
+
+        .controls-spacer { flex: 1; }
+
+        .volume-container {
+            display: flex;
+            align-items: center;
+            gap: 2px;
+        }
+
+        .volume-container input[type="range"] {
+            display: none;
+            width: 50px;
+            accent-color: var(--primary);
+            height: 4px;
+        }
+
+        .volume-container:hover input[type="range"] {
+            display: inline;
+        }
+
+        #cc-popup {
+            display: none;
+            position: absolute;
+            bottom: 50px;
+            right: 10px;
+            background: var(--card-bg);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 14px;
+            min-width: 200px;
+            z-index: 20;
+        }
+
+        #cc-popup.show { display: block; }
+
+        #cc-popup label {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 10px;
+            font-size: 0.85rem;
+            color: var(--text);
+            margin-bottom: 10px;
+        }
+
+        #cc-popup label:last-child { margin-bottom: 0; }
+
+        #cc-popup select {
+            background: var(--bg);
+            border: 1px solid var(--border);
+            color: var(--text);
+            padding: 4px 8px;
+            border-radius: 4px;
+            outline: none;
+            width: 110px;
+        }
+
+        #cc-popup input[type="range"] {
+            width: 110px;
+            accent-color: var(--primary);
+        }
+
+        #cc-popup .cc-toggle {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .cc-indicator {
+            font-size: 0.7rem;
+            background: var(--primary);
+            color: #fff;
+            border-radius: 3px;
+            padding: 1px 4px;
+            margin-left: 4px;
+            vertical-align: super;
+            font-weight: 700;
+        }
     </style>
 </head>
 <body>
-    <h1>StreamVault</h1>
+    <h1><a href="/" onclick="closePlayer();return false;" style="color:inherit;text-decoration:none">cine-web</a></h1>
     
     <div id="player-container">
         <div class="player-header">
-            <h2 id="current-title" style="margin:0">Watching...</h2>
+            <div>
+                <h2 id="current-title" style="margin:0">Watching...</h2>
+                <span id="current-meta" style="font-size:0.85rem;color:var(--text-muted)"></span>
+            </div>
             <span class="close-player" onclick="closePlayer()">✕</span>
         </div>
         <div class="controls">
             <label>Source: 
                 <select id="source-select" onchange="updatePlayer()">
+                    <option value="vixsrc">VixSrc</option>
                     <option value="vidsrcto">VidSrc.to</option>
-                    <option value="hnembed">HNEmbed</option>
                     <option value="vidapi">VidAPI</option>
                 </select>
             </label>
             <label id="season-label">Season: <input type="number" id="season-input" value="1" min="1" onchange="updatePlayer()"></label>
             <label id="episode-label">Episode: <input type="number" id="episode-input" value="1" min="1" onchange="updatePlayer()"></label>
-            <button id="refresh-player" onclick="updatePlayer()">Refresh Player</button>
+            <label id="quality-label" style="display:none">Quality: <select id="quality-select"></select></label>
+            <label id="audio-label" style="display:none">Audio: <select id="audio-select"></select></label>
+            <button id="refresh-player" onclick="updatePlayer()">Refresh</button>
+            <button id="prev-ep" onclick="changeEpisode(-1)" title="Previous episode">◀</button>
+            <button id="next-ep" onclick="changeEpisode(1)" title="Next episode">▶</button>
         </div>
         <iframe id="video-frame" allowfullscreen allow="autoplay; fullscreen"></iframe>
+        <div class="video-wrapper" id="video-wrapper" style="display:none">
+            <video id="video-player" preload="auto" playsinline controls></video>
+            <div id="center-play">▶</div>
+            <div id="custom-controls">
+                <div class="progress-container" id="progress-container">
+                    <div class="track"></div>
+                    <div class="buffer" id="progress-buffer"></div>
+                    <div class="played" id="progress-played"></div>
+                    <div class="thumb" id="progress-thumb"></div>
+                </div>
+                <div class="controls-row">
+                    <button class="control-btn" id="play-btn" title="Play/Pause">▶</button>
+                    <div class="volume-container">
+                        <button class="control-btn" id="mute-btn" title="Mute">🔊</button>
+                        <input type="range" id="volume-slider" min="0" max="1" step="0.05" value="1">
+                    </div>
+                    <span id="time-display">0:00 / 0:00</span>
+                    <div class="controls-spacer"></div>
+                    <button class="control-btn" id="seek-back" title="-10s">↺10</button>
+                    <button class="control-btn" id="seek-fwd" title="+10s">↻10</button>
+                    <button class="control-btn" id="cc-btn" title="Subtitles">CC</button>
+                    <button class="control-btn" id="fullscreen-btn" title="Fullscreen">⛶</button>
+                </div>
+                <div id="cc-popup">
+                    <div class="cc-toggle">
+                        <span>Subtitles</span>
+                        <label style="margin:0"><input type="checkbox" id="cc-toggle"> On</label>
+                    </div>
+                    <label>Track: <select id="cc-track-select"><option value="-1">Off</option></select></label>
+                    <label>Size: <input type="range" id="cc-size" min="50" max="500" value="100"></label>
+                    <label>Position: <input type="range" id="cc-position" min="0" max="95" value="0"></label>
+                </div>
+            </div>
+        </div>
     </div>
 
     <div class="search-container">
@@ -249,56 +487,220 @@
         const statusMsg = document.getElementById('status-msg');
         const playerContainer = document.getElementById('player-container');
         const videoFrame = document.getElementById('video-frame');
+        const videoPlayer = document.getElementById('video-player');
+        const videoWrapper = document.getElementById('video-wrapper');
+        const qualitySelect = document.getElementById('quality-select');
         
         let currentItem = null;
+        let hls = null;
+        let vixsrcSources = [];
+        let vixsrcReferer = '';
+
+        function updateUrl(item, season, episode, source) {
+            const params = new URLSearchParams();
+            params.set('id', item.id);
+            params.set('type', item.type);
+            params.set('title', item.title);
+            if (item.type !== 'movie') {
+                params.set('s', season || 1);
+                params.set('e', episode || 1);
+            }
+            params.set('src', source || 'vixsrc');
+            const url = `${window.location.pathname}?${params}`;
+            window.history.replaceState({ id: item.id, type: item.type, season, episode, source }, '', url);
+            document.title = `${item.title}${item.type !== 'movie' ? ` S${season}E${episode}` : ''} - cine-web`;
+        }
 
         function closePlayer() {
             playerContainer.style.display = 'none';
             videoFrame.src = '';
+            videoWrapper.style.display = 'none';
+            videoPlayer.pause();
+            videoPlayer.removeAttribute('src');
+            if (hls) { hls.destroy(); hls = null; }
+            const url = window.location.pathname;
+            window.history.replaceState(null, '', url);
+            document.title = 'cine-web';
         }
 
-        function openPlayer(item) {
+        function openPlayer(item, season, episode) {
             currentItem = item;
             playerContainer.style.display = 'block';
-            document.getElementById('current-title').innerText = item.title;
-            document.getElementById('season-input').value = item.season || 1;
-            document.getElementById('episode-input').value = 1;
+            document.getElementById('season-input').value = season || item.season || 1;
+            document.getElementById('episode-input').value = episode || 1;
             
             if (item.type === 'movie') {
                 document.getElementById('season-label').style.display = 'none';
                 document.getElementById('episode-label').style.display = 'none';
+                document.getElementById('prev-ep').style.display = 'none';
+                document.getElementById('next-ep').style.display = 'none';
             } else {
                 document.getElementById('season-label').style.display = 'inline-flex';
                 document.getElementById('episode-label').style.display = 'inline-flex';
+                document.getElementById('prev-ep').style.display = 'inline-block';
+                document.getElementById('next-ep').style.display = 'inline-block';
             }
             
             updatePlayer();
+            updateUrl(item, document.getElementById('season-input').value, document.getElementById('episode-input').value, document.getElementById('source-select').value);
             playerContainer.scrollIntoView({ behavior: 'smooth' });
         }
 
-        function updatePlayer() {
+        function playHlsUrl(url, referer) {
+            if (hls) { hls.destroy(); hls = null; }
+            videoWrapper.style.display = 'block';
+            videoFrame.style.display = 'none';
+            videoPlayer.removeAttribute('src');
+
+            const proxyUrl = `/api/proxy?url=${encodeURIComponent(url)}&referer=${encodeURIComponent(referer)}`;
+
+            if (Hls.isSupported()) {
+                hls = new Hls({ subtitleDisplay: true });
+                videoPlayer.controls = false;
+                hls.loadSource(proxyUrl);
+                hls.attachMedia(videoPlayer);
+
+                hls.on(Hls.Events.MANIFEST_PARSED, () => {
+                    initControls();
+                    videoPlayer.play().catch(() => {});
+                    const audioSelect = document.getElementById('audio-select');
+                    if (hls.audioTracks && hls.audioTracks.length > 0) {
+                        const engIdx = hls.audioTracks.findIndex(t => t.lang && t.lang.startsWith('eng'));
+                        if (engIdx >= 0) {
+                            hls.audioTrack = engIdx;
+                            audioSelect.value = engIdx;
+                        } else {
+                            audioSelect.value = hls.audioTrack;
+                        }
+                    }
+                    updateSubtitleTracks();
+                });
+
+                hls.on(Hls.Events.AUDIO_TRACKS_UPDATED, () => {
+                    const audioSelect = document.getElementById('audio-select');
+                    if (hls.audioTracks && hls.audioTracks.length > 0) {
+                        const engIdx = hls.audioTracks.findIndex(t => t.lang && t.lang.startsWith('eng'));
+                        if (engIdx >= 0 && hls.audioTrack !== engIdx) {
+                            hls.audioTrack = engIdx;
+                            audioSelect.value = engIdx;
+                        }
+                    }
+                });
+
+                hls.on(Hls.Events.SUBTITLE_TRACKS_UPDATED, () => updateSubtitleTracks());
+                hls.on(Hls.Events.CUES_PARSED, () => applySubtitlePosition());
+            } else if (videoPlayer.canPlayType('application/vnd.apple.mpegurl')) {
+                videoPlayer.controls = true;
+                videoPlayer.src = proxyUrl;
+                videoPlayer.play();
+            }
+        }
+
+        async function updatePlayer() {
             if (!currentItem) return;
             const season = document.getElementById('season-input').value;
             const episode = document.getElementById('episode-input').value;
             const source = document.getElementById('source-select').value;
             const imdbId = currentItem.id;
-            
-            let url = '';
             const isMovie = currentItem.type === 'movie';
 
-            switch(source) {
-                case 'vidsrcto': 
-                    url = `https://vidsrc.to/embed/${isMovie ? 'movie' : 'tv'}/${imdbId}${isMovie ? '' : `/${season}/${episode}`}`; 
-                    break;
-                case 'hnembed': 
-                    url = `https://hnembed.cc/embed/${isMovie ? 'movie' : 'tv'}/${imdbId}${isMovie ? '' : `/${season}/${episode}`}`; 
-                    break;
-                case 'vidapi': 
-                    url = `https://vaplayer.ru/embed/${isMovie ? 'movie' : 'tv'}/${imdbId}${isMovie ? '' : `/${season}/${episode}`}`; 
-                    break;
+            const meta = document.getElementById('current-meta');
+            if (isMovie) {
+                meta.innerText = 'Movie';
+            } else {
+                meta.innerText = `S${season} \u00B7 E${episode}`;
             }
+            document.getElementById('current-title').innerText = currentItem.title;
+            updateUrl(currentItem, season, episode, source);
 
-            videoFrame.src = url;
+            const qualityLabel = document.getElementById('quality-label');
+            const audioLabel = document.getElementById('audio-label');
+            const audioSelect = document.getElementById('audio-select');
+            qualityLabel.style.display = source === 'vixsrc' ? 'inline-flex' : 'none';
+            qualitySelect.style.display = source === 'vixsrc' ? 'inline-block' : 'none';
+            audioLabel.style.display = 'none';
+            audioSelect.style.display = 'none';
+
+            if (source === 'vixsrc') {
+                videoFrame.style.display = 'none';
+                videoFrame.src = '';
+                statusMsg.innerText = 'Looking up TMDB ID...';
+
+                const lookupRes = await fetch(`/api/lookup/imdb-to-tmdb/${imdbId}`);
+                const lookup = await lookupRes.json();
+                if (!lookup.tmdbId) {
+                    statusMsg.innerText = 'Set TMDB_API_KEY env var for VixSrc. Get one free at tmdb.org.';
+                    return;
+                }
+
+                const type = lookup.type || (isMovie ? 'movie' : 'tv');
+                let streamUrl = `/api/vixsrc/${type}/${lookup.tmdbId}`;
+                if (type === 'tv') streamUrl += `?season=${season}&episode=${episode}`;
+
+                statusMsg.innerText = 'Loading VixSrc stream...';
+                const streamRes = await fetch(streamUrl);
+                const streamData = await streamRes.json();
+                statusMsg.innerText = '';
+
+                if (!streamData.sources || streamData.sources.length === 0) {
+                    statusMsg.innerText = 'No VixSrc streams available.';
+                    return;
+                }
+
+                vixsrcSources = streamData.sources;
+                vixsrcReferer = streamData.referer || 'https://vixsrc.to/';
+
+                qualitySelect.innerHTML = '';
+                streamData.sources.forEach((s, i) => {
+                    const opt = document.createElement('option');
+                    opt.value = i;
+                    opt.textContent = s.quality;
+                    qualitySelect.appendChild(opt);
+                });
+                qualitySelect.value = 0;
+
+                // Populate audio tracks from server data
+                const audioSelect = document.getElementById('audio-select');
+                const audioLabel = document.getElementById('audio-label');
+                audioSelect.innerHTML = '';
+                if (streamData.audioTracks && streamData.audioTracks.length > 1) {
+                    streamData.audioTracks.forEach((t, i) => {
+                        const opt = document.createElement('option');
+                        opt.value = i;
+                        opt.textContent = t.label + ' (' + t.language + ')';
+                        audioSelect.appendChild(opt);
+                    });
+                    // Auto-select English
+                    const engIdx = streamData.audioTracks.findIndex(t => t.language.startsWith('eng'));
+                    if (engIdx >= 0) {
+                        audioSelect.value = engIdx;
+                        if (hls && hls.audioTrack !== undefined) {
+                            hls.audioTrack = engIdx;
+                        }
+                    }
+                    audioLabel.style.display = 'inline-flex';
+                    audioSelect.style.display = 'inline-block';
+                }
+
+                playHlsUrl(streamData.sources[0].url, vixsrcReferer);
+            } else {
+                if (hls) { hls.destroy(); hls = null; }
+                videoPlayer.pause();
+                videoWrapper.style.display = 'none';
+                videoPlayer.removeAttribute('src');
+                videoFrame.style.display = 'block';
+
+                let url = '';
+                switch(source) {
+                    case 'vidsrcto': 
+                        url = `https://vidsrc.to/embed/${isMovie ? 'movie' : 'tv'}/${imdbId}${isMovie ? '' : `/${season}/${episode}`}`; 
+                        break;
+                    case 'vidapi': 
+                        url = `https://vaplayer.ru/embed/${isMovie ? 'movie' : 'tv'}/${imdbId}${isMovie ? '' : `/${season}/${episode}`}`; 
+                        break;
+                }
+                videoFrame.src = url;
+            }
         }
 
         async function doSearch() {
@@ -340,9 +742,226 @@
             }
         }
 
+        /* --- Custom Controls --- */
+        let controlsInited = false;
+        let hideControlsTimer = null;
+
+        function initControls() {
+            if (controlsInited) return;
+            controlsInited = true;
+            videoWrapper.classList.add('show-controls');
+            clearTimeout(hideControlsTimer);
+            hideControlsTimer = setTimeout(() => videoWrapper.classList.remove('show-controls'), 3000);
+        }
+
+        function formatTime(t) {
+            if (!t || !isFinite(t)) return '0:00';
+            const m = Math.floor(t / 60);
+            const s = Math.floor(t % 60);
+            return `${m}:${s.toString().padStart(2, '0')}`;
+        }
+
+        function updateControls() {
+            const played = document.getElementById('progress-played');
+            const thumb = document.getElementById('progress-thumb');
+            const buffer = document.getElementById('progress-buffer');
+            const timeDisplay = document.getElementById('time-display');
+            const playBtn = document.getElementById('play-btn');
+            const centerPlay = document.getElementById('center-play');
+
+            if (!videoPlayer.duration) return;
+            const pct = (videoPlayer.currentTime / videoPlayer.duration) * 100;
+            played.style.width = pct + '%';
+            thumb.style.left = pct + '%';
+
+            if (videoPlayer.buffered.length > 0) {
+                const end = videoPlayer.buffered.end(videoPlayer.buffered.length - 1);
+                const bufPct = (end / videoPlayer.duration) * 100;
+                buffer.style.width = bufPct + '%';
+            }
+
+            timeDisplay.textContent = `${formatTime(videoPlayer.currentTime)} / ${formatTime(videoPlayer.duration)}`;
+            const icon = videoPlayer.paused ? '▶' : '⏸';
+            playBtn.textContent = icon;
+            centerPlay.textContent = icon;
+        }
+
+        function seek(e) {
+            const rect = e.currentTarget.getBoundingClientRect();
+            const x = (e.clientX - rect.left) / rect.width;
+            videoPlayer.currentTime = x * videoPlayer.duration;
+        }
+
+        function updateSubtitleTracks() {
+            const select = document.getElementById('cc-track-select');
+            if (!hls || !hls.subtitleTracks) return;
+            select.innerHTML = '<option value="-1">Off</option>';
+            hls.subtitleTracks.forEach((t, i) => {
+                const opt = document.createElement('option');
+                opt.value = i;
+                opt.textContent = t.name || t.lang || `Track ${i}`;
+                select.appendChild(opt);
+            });
+        }
+
+        videoPlayer.addEventListener('timeupdate', updateControls);
+        videoPlayer.addEventListener('loadedmetadata', updateControls);
+        videoPlayer.addEventListener('progress', updateControls);
+        videoPlayer.addEventListener('play', updateControls);
+        videoPlayer.addEventListener('pause', updateControls);
+
+        videoWrapper.addEventListener('mousemove', () => {
+            videoWrapper.classList.add('show-controls');
+            clearTimeout(hideControlsTimer);
+            if (!videoPlayer.paused) {
+                hideControlsTimer = setTimeout(() => videoWrapper.classList.remove('show-controls'), 3000);
+            }
+        });
+
+        videoWrapper.addEventListener('mouseleave', () => {
+            if (!videoPlayer.paused) {
+                videoWrapper.classList.remove('show-controls');
+            }
+        });
+
+        function togglePlay() {
+            if (videoPlayer.paused) videoPlayer.play().catch(() => {});
+            else videoPlayer.pause();
+        }
+
+        document.getElementById('play-btn').addEventListener('click', togglePlay);
+        document.getElementById('center-play').addEventListener('click', togglePlay);
+
+        document.getElementById('progress-container').addEventListener('click', seek);
+
+        document.getElementById('seek-back').addEventListener('click', () => { videoPlayer.currentTime = Math.max(0, videoPlayer.currentTime - 10); });
+        document.getElementById('seek-fwd').addEventListener('click', () => { videoPlayer.currentTime = Math.min(videoPlayer.duration, videoPlayer.currentTime + 10); });
+
+        document.getElementById('mute-btn').addEventListener('click', () => {
+            videoPlayer.muted = !videoPlayer.muted;
+            document.getElementById('mute-btn').textContent = videoPlayer.muted ? '🔇' : (videoPlayer.volume > 0.5 ? '🔊' : '🔉');
+        });
+
+        document.getElementById('volume-slider').addEventListener('input', (e) => {
+            const v = parseFloat(e.target.value);
+            videoPlayer.volume = v;
+            videoPlayer.muted = false;
+            document.getElementById('mute-btn').textContent = v === 0 ? '🔇' : (v > 0.5 ? '🔊' : '🔉');
+        });
+
+        function toggleFullscreen() {
+            if (document.fullscreenElement) {
+                document.exitFullscreen();
+            } else {
+                videoWrapper.requestFullscreen();
+            }
+        }
+
+        document.getElementById('fullscreen-btn').addEventListener('click', toggleFullscreen);
+        videoWrapper.addEventListener('dblclick', toggleFullscreen);
+
+        // CC popup
+        document.getElementById('cc-btn').addEventListener('click', (e) => {
+            e.stopPropagation();
+            document.getElementById('cc-popup').classList.toggle('show');
+        });
+
+        document.addEventListener('click', () => {
+            document.getElementById('cc-popup').classList.remove('show');
+        });
+
+        document.getElementById('cc-popup').addEventListener('click', (e) => e.stopPropagation());
+
+        document.getElementById('cc-toggle').addEventListener('change', (e) => {
+            if (!hls) return;
+            const select = document.getElementById('cc-track-select');
+            if (e.target.checked) {
+                const engIdx = hls.subtitleTracks ? hls.subtitleTracks.findIndex(t => t.lang && t.lang.startsWith('eng')) : -1;
+                select.value = engIdx >= 0 ? engIdx : (hls.subtitleTracks && hls.subtitleTracks.length > 0 ? 0 : -1);
+                hls.subtitleTrack = parseInt(select.value);
+            } else {
+                select.value = '-1';
+                hls.subtitleTrack = -1;
+            }
+        });
+
+        document.getElementById('cc-track-select').addEventListener('change', (e) => {
+            if (!hls) return;
+            const idx = parseInt(e.target.value);
+            hls.subtitleTrack = idx;
+            document.getElementById('cc-toggle').checked = idx >= 0;
+        });
+
+        document.getElementById('cc-size').addEventListener('input', (e) => {
+            const size = parseFloat(e.target.value) / 100;
+            videoPlayer.style.setProperty('--subtitle-size', size + 'em');
+        });
+
+        function applySubtitlePosition() {
+            const sliderVal = parseInt(document.getElementById('cc-position').value);
+            const pos = 95 - sliderVal; // 0=bottom, 95=top
+            for (let i = 0; i < videoPlayer.textTracks.length; i++) {
+                const tt = videoPlayer.textTracks[i];
+                if (tt.kind !== 'subtitles' && tt.kind !== 'captions') continue;
+                for (let j = 0; j < tt.cues.length; j++) {
+                    const cue = tt.cues[j];
+                    cue.snapToLines = false;
+                    cue.line = pos;
+                }
+            }
+        }
+
+        document.getElementById('cc-position').addEventListener('input', applySubtitlePosition);
+
+        function changeEpisode(dir) {
+            const epInput = document.getElementById('episode-input');
+            const ep = parseInt(epInput.value) + dir;
+            if (ep < 1) return;
+            epInput.value = ep;
+            updatePlayer();
+        }
+
+        qualitySelect.addEventListener('change', () => {
+            const idx = parseInt(qualitySelect.value);
+            const source = vixsrcSources[idx];
+            if (source) playHlsUrl(source.url, vixsrcReferer);
+        });
+
+        document.getElementById('audio-select').addEventListener('change', () => {
+            if (hls) {
+                const idx = parseInt(document.getElementById('audio-select').value);
+                hls.audioTrack = idx;
+            }
+        });
+
         searchButton.addEventListener('click', doSearch);
         searchInput.addEventListener('keypress', (e) => {
             if (e.key === 'Enter') doSearch();
+        });
+
+        // Restore state from URL on page load
+        (function restoreFromUrl() {
+            const params = new URLSearchParams(window.location.search);
+            const id = params.get('id');
+            const type = params.get('type');
+            const title = params.get('title');
+            if (!id || !type || !title) return;
+
+            const season = params.has('s') ? Number(params.get('s')) : 1;
+            const episode = params.has('e') ? Number(params.get('e')) : 1;
+            const source = params.get('src') || 'vixsrc';
+
+            const item = { id, type, title, season };
+            document.getElementById('source-select').value = source;
+            openPlayer(item, season, episode);
+        })();
+
+        window.addEventListener('popstate', (e) => {
+            if (e.state && e.state.id) {
+                const item = { id: e.state.id, type: e.state.type, title: e.state.title || '' };
+                document.getElementById('source-select').value = e.state.source || 'vixsrc';
+                openPlayer(item, e.state.season, e.state.episode);
+            }
         });
     </script>
 </body>
