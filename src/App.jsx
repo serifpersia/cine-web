@@ -9,28 +9,53 @@ function formatTime(t) {
 
 function SearchBar({ value, onChange, onSearch }) {
   return (
-    <div class="search-container">
-      <input
-        type="text"
-        placeholder="Enter movie or show name..."
-        value={value}
-        onInput={e => onChange(e.target.value)}
-        onKeyPress={e => { if (e.key === 'Enter') onSearch(); }}
-      />
-      <button onClick={onSearch}>Search</button>
+    <div class="search-wrapper">
+      <div class="search-container">
+        <div class="search-icon-svg">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="11" cy="11" r="8"></circle>
+            <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+          </svg>
+        </div>
+        <input
+          type="text"
+          placeholder="Enter movie or show name..."
+          value={value}
+          onInput={e => onChange(e.target.value)}
+          onKeyPress={e => { if (e.key === 'Enter') onSearch(); }}
+        />
+        <button onClick={onSearch}>
+          <span>Search</span>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="9 18 15 12 9 6"></polyline>
+          </svg>
+        </button>
+      </div>
     </div>
   );
 }
 
 function ResultCard({ item, onSelect }) {
+  const isTV = item.type === 'tvSeries' || item.type === 'tvMiniSeries' || item.type === 'tv';
   return (
     <div class="result-item" onClick={() => onSelect(item)}>
-      <img src={item.image || 'https://via.placeholder.com/180x260?text=No+Poster'} alt={item.title} loading="lazy" />
+      <div class="result-poster-wrapper">
+        <img src={item.image || 'https://via.placeholder.com/180x260?text=No+Poster'} alt={item.title} loading="lazy" />
+        <div class="result-poster-overlay">
+          <div class="play-hover-badge">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+              <polygon points="5 3 19 12 5 21 5 3"></polygon>
+            </svg>
+          </div>
+        </div>
+      </div>
       <div class="result-content">
         <h3>{item.title}</h3>
         <p>
           <span>{item.year || 'N/A'}</span>
-          <span class="type-badge">{item.type === 'tvSeries' ? 'TV' : 'Movie'}</span>
+          <span class={`type-badge ${isTV ? 'tv' : 'movie'}`}>
+            {isTV ? 'TV Series' : 'Movie'}
+          </span>
         </p>
       </div>
     </div>
@@ -220,14 +245,34 @@ function VideoPlayer({ url }) {
         wrapper.classList.remove('show-controls');
       }
     };
-    const onDbl = () => toggleFS();
+    const onDbl = (e) => {
+      if (e.target.closest('.custom-controls')) return;
+      toggleFS();
+    };
+    const onClick = (e) => {
+      if (e.target.closest('.custom-controls')) return;
+      
+      const isShowing = wrapper.classList.contains('show-controls');
+      if (isShowing) {
+        wrapper.classList.remove('show-controls');
+        clearTimeout(hideTimerRef.current);
+      } else {
+        wrapper.classList.add('show-controls');
+        clearTimeout(hideTimerRef.current);
+        if (videoRef.current && !videoRef.current.paused) {
+          hideTimerRef.current = setTimeout(() => wrapper.classList.remove('show-controls'), 3000);
+        }
+      }
+    };
     wrapper.addEventListener('mousemove', onMove);
     wrapper.addEventListener('mouseleave', onLeave);
     wrapper.addEventListener('dblclick', onDbl);
+    wrapper.addEventListener('click', onClick);
     return () => {
       wrapper.removeEventListener('mousemove', onMove);
       wrapper.removeEventListener('mouseleave', onLeave);
       wrapper.removeEventListener('dblclick', onDbl);
+      wrapper.removeEventListener('click', onClick);
     };
   }, []);
 
@@ -251,7 +296,18 @@ function VideoPlayer({ url }) {
   return (
     <div class="video-wrapper show-controls" ref={wrapperRef}>
       <video ref={videoRef} preload="auto" playsinline></video>
-      <div class="center-play" onClick={togglePlay}>{playing ? '⏸' : '▶'}</div>
+      <div class="center-play" onClick={(e) => { e.stopPropagation(); togglePlay(); }}>
+        {playing ? (
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor">
+            <rect x="6" y="4" width="4" height="16"></rect>
+            <rect x="14" y="4" width="4" height="16"></rect>
+          </svg>
+        ) : (
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor">
+            <polygon points="5 3 19 12 5 21 5 3"></polygon>
+          </svg>
+        )}
+      </div>
       <div class="custom-controls">
         <div class="progress-container" onClick={seek}>
           <div class="track"></div>
@@ -260,14 +316,44 @@ function VideoPlayer({ url }) {
           <div class="thumb" ref={progressThumbRef}></div>
         </div>
         <div class="controls-row">
-          <button class="control-btn" onClick={togglePlay}>{playing ? '⏸' : '▶'}</button>
+          <button class="control-btn" onClick={togglePlay}>
+            {playing ? (
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
+                <rect x="6" y="4" width="4" height="16"></rect>
+                <rect x="14" y="4" width="4" height="16"></rect>
+              </svg>
+            ) : (
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
+                <polygon points="5 3 19 12 5 21 5 3"></polygon>
+              </svg>
+            )}
+          </button>
+          
           <div class="volume-container">
             <button class="control-btn" onClick={() => {
               const v = videoRef.current;
               if (!v) return;
               v.muted = !v.muted;
               setMuted(v.muted);
-            }}>{muted ? '🔇' : (volume > 0.5 ? '🔊' : '🔉')}</button>
+            }}>
+              {muted ? (
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon>
+                  <line x1="23" y1="9" x2="17" y2="15"></line>
+                  <line x1="17" y1="9" x2="23" y2="15"></line>
+                </svg>
+              ) : volume > 0.5 ? (
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon>
+                  <path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"></path>
+                </svg>
+              ) : (
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon>
+                  <path d="M15.54 8.46a5 5 0 0 1 0 7.07"></path>
+                </svg>
+              )}
+            </button>
             <input type="range" min="0" max="1" step="0.05" value={volume}
               onInput={e => {
                 const v = parseFloat(e.target.value);
@@ -276,18 +362,50 @@ function VideoPlayer({ url }) {
                 if (video) { video.volume = v; video.muted = false; setMuted(false); }
               }} />
           </div>
+          
           <span class="time-display" ref={timeDisplayRef}>0:00 / 0:00</span>
+          
           <div class="controls-spacer"></div>
-          <button class="control-btn" onClick={() => { const v = videoRef.current; if (v) v.currentTime = Math.max(0, v.currentTime - 10); }}>↺10</button>
-          <button class="control-btn" onClick={() => { const v = videoRef.current; if (v) v.currentTime = Math.min(v.duration, v.currentTime + 10); }}>↻10</button>
-          <button class="control-btn" onClick={e => { e.stopPropagation(); setShowCC(s => !s); }}>CC</button>
-          <button class="control-btn" onClick={toggleFS}>⛶</button>
+          
+          <button class="control-btn" title="Rewind 10s" onClick={() => { const v = videoRef.current; if (v) v.currentTime = Math.max(0, v.currentTime - 10); }}>
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"></path>
+              <polyline points="3 3 3 8 8 8"></polyline>
+              <text x="12" y="15" font-size="8" font-family="system-ui" font-weight="bold" text-anchor="middle" fill="currentColor" stroke="none">10</text>
+            </svg>
+          </button>
+          
+          <button class="control-btn" title="Forward 10s" onClick={() => { const v = videoRef.current; if (v) v.currentTime = Math.min(v.duration, v.currentTime + 10); }}>
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M21 12a9 9 0 1 1-9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"></path>
+              <polyline points="21 3 21 8 16 8"></polyline>
+              <text x="12" y="15" font-size="8" font-family="system-ui" font-weight="bold" text-anchor="middle" fill="currentColor" stroke="none">10</text>
+            </svg>
+          </button>
+          
+          <button class="control-btn" title="Subtitles & CC" onClick={e => { e.stopPropagation(); setShowCC(s => !s); }}>
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
+              <line x1="7" y1="10" x2="11" y2="10"></line>
+              <line x1="7" y1="14" x2="17" y2="14"></line>
+              <line x1="15" y1="10" x2="17" y2="10"></line>
+            </svg>
+          </button>
+          
+          <button class="control-btn" title="Toggle Fullscreen" onClick={toggleFS}>
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"></path>
+            </svg>
+          </button>
         </div>
+        
         <div class={'cc-popup' + (showCC ? ' show' : '')} onClick={e => e.stopPropagation()}>
           <div class="cc-toggle">
             <span>Subtitles</span>
-            <label style="margin:0"><input type="checkbox" checked={subEnabled}
-              onChange={e => setSubEnabled(e.target.checked)} /> On</label>
+            <label class="checkbox-container" style="margin:0">
+              <input type="checkbox" checked={subEnabled} onChange={e => setSubEnabled(e.target.checked)} />
+              <span>On</span>
+            </label>
           </div>
           <label>Track:
             <select id="cc-track-select" value={subTrack}
@@ -383,14 +501,26 @@ function Player({ item, source, season, episode, qualityIdx, onClose, onSourceCh
       <div class="player-header">
         <div>
           <h2>{item.title}</h2>
-          <span style="font-size:0.85rem;color:var(--text-muted)">
-            {isMovie ? 'Movie' : 'S' + season + ' · E' + episode}
-          </span>
+          <div class="player-meta-info">
+            <span class={`type-badge ${isMovie ? 'movie' : 'tv'}`}>
+              {isMovie ? 'Movie' : 'TV Show'}
+            </span>
+            {!isMovie && (
+              <span class="player-meta-badge">
+                Season {season} · Episode {episode}
+              </span>
+            )}
+          </div>
         </div>
-        <button class="close-player" onClick={onClose}>✕</button>
+        <button class="close-player" title="Close Player" onClick={onClose}>
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+            <line x1="18" y1="6" x2="6" y2="18"></line>
+            <line x1="6" y1="6" x2="18" y2="18"></line>
+          </svg>
+        </button>
       </div>
       <div class="controls">
-        <label>Source:
+        <label>Source
           <select value={source} onChange={onSourceChange}>
             <option value="vixsrc">VixSrc</option>
             <option value="vidsrcto">VidSrc.to</option>
@@ -399,16 +529,16 @@ function Player({ item, source, season, episode, qualityIdx, onClose, onSourceCh
         </label>
         {!isMovie && (
           <>
-            <label>Season:
+            <label>Season
               <input type="number" value={season} min="1" onChange={onSeasonChange} />
             </label>
-            <label>Episode:
+            <label>Episode
               <input type="number" value={episode} min="1" onChange={onEpisodeChange} />
             </label>
           </>
         )}
         {source === 'vixsrc' && vixsrcSources.length > 0 && (
-          <label>Quality:
+          <label>Quality
             <select value={qualityIdx} onChange={onQualityChange}>
               {vixsrcSources.map((s, i) => (
                 <option key={i} value={i}>{s.quality}</option>
@@ -417,15 +547,23 @@ function Player({ item, source, season, episode, qualityIdx, onClose, onSourceCh
           </label>
         )}
         {!isMovie && (
-          <>
-            <button onClick={() => onEpisodeChange({ target: { value: Math.max(1, episode - 1) } })}>◀</button>
-            <button onClick={() => onEpisodeChange({ target: { value: episode + 1 } })}>▶</button>
-          </>
+          <div style="display: flex; gap: 8px; align-self: flex-end;">
+            <button class="control-nav-btn" title="Previous Episode" onClick={() => onEpisodeChange({ target: { value: Math.max(1, episode - 1) } })}>
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                <polyline points="15 18 9 12 15 6"></polyline>
+              </svg>
+            </button>
+            <button class="control-nav-btn" title="Next Episode" onClick={() => onEpisodeChange({ target: { value: episode + 1 } })}>
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                <polyline points="9 18 15 12 9 6"></polyline>
+              </svg>
+            </button>
+          </div>
         )}
       </div>
 
       {streamLoading && <div class="status-msg">Loading stream...</div>}
-      {streamError && <div class="status-msg">{streamError}</div>}
+      {streamError && <div class="status-msg status-msg-text-only">{streamError}</div>}
 
       {source === 'vixsrc' && currentUrl && !streamLoading && !streamError && (
         <VideoPlayer url={'/api/proxy?url=' + encodeURIComponent(currentUrl) + '&referer=' + encodeURIComponent(vixsrcReferer)} />
@@ -437,10 +575,23 @@ function Player({ item, source, season, episode, qualityIdx, onClose, onSourceCh
   );
 }
 
+const SUGGESTIONS = [
+  'Stranger Things',
+  'Breaking Bad',
+  'House of the Dragon',
+  'Wednesday',
+  'The Boys',
+  'Interstellar',
+  'Dune',
+  'Avengers',
+  'Oppenheimer'
+];
+
 export default function App() {
   const [query, setQuery] = useState('');
   const [results, setResults] = useState([]);
   const [status, setStatus] = useState('');
+  const [isLoading, setIsLoading] = useState(false);
   const [currentItem, setCurrentItem] = useState(null);
   const [source, setSource] = useState('vixsrc');
   const [season, setSeason] = useState(1);
@@ -450,16 +601,37 @@ export default function App() {
   const doSearch = async () => {
     const q = query.trim();
     if (!q) return;
-    setStatus('Searching...');
+    setIsLoading(true);
+    setStatus('Searching for "' + q + '"...');
     setResults([]);
     try {
       const res = await fetch('/api/search?q=' + encodeURIComponent(q));
       const data = await res.json();
+      setIsLoading(false);
       setStatus(data.length ? '' : 'No results found. Try a different title.');
       setResults(data);
     } catch (err) {
       console.error(err);
-      setStatus('Search failed.');
+      setIsLoading(false);
+      setStatus('Search failed. Please try again.');
+    }
+  };
+
+  const handleSelectSuggestion = async (tag) => {
+    setQuery(tag);
+    setIsLoading(true);
+    setStatus('Searching for "' + tag + '"...');
+    setResults([]);
+    try {
+      const res = await fetch('/api/search?q=' + encodeURIComponent(tag));
+      const data = await res.json();
+      setIsLoading(false);
+      setStatus(data.length ? '' : 'No results found. Try a different title.');
+      setResults(data);
+    } catch (err) {
+      console.error(err);
+      setIsLoading(false);
+      setStatus('Search failed. Please try again.');
     }
   };
 
@@ -508,7 +680,7 @@ export default function App() {
       '',
       '?' + params.toString()
     );
-    document.title = currentItem.title + (currentItem.type !== 'movie' ? ' S' + season + 'E' + episode : '') + ' - cine-web';
+    document.title = currentItem.title + (currentItem.type !== 'movie' ? ' S' + season + 'E' + episode : '') + ' - cineweb';
   }, [currentItem, source, season, episode]);
 
   useEffect(() => {
@@ -532,7 +704,14 @@ export default function App() {
 
   return (
     <div>
-      <a href="/" class="app-title" onClick={onHeaderClick}>cine-web</a>
+      <header class="header">
+        <a href="/" class="logo-container" onClick={e => { e.preventDefault(); onHeaderClick(); }}>
+          <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#e50914" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="filter: drop-shadow(0 0 8px rgba(229, 9, 20, 0.4));">
+            <polygon points="5 3 19 12 5 21 5 3" fill="#e50914"></polygon>
+          </svg>
+          <span class="app-title">cine<span class="logo-highlight">web</span></span>
+        </a>
+      </header>
 
       {currentItem && (
         <Player
@@ -553,7 +732,25 @@ export default function App() {
       )}
 
       <SearchBar value={query} onChange={setQuery} onSearch={doSearch} />
-      {status && <div class="status-msg">{status}</div>}
+      
+      <div class="suggestions-container">
+        {SUGGESTIONS.map(tag => (
+          <button
+            key={tag}
+            class="suggestion-pill"
+            onClick={() => handleSelectSuggestion(tag)}
+          >
+            {tag}
+          </button>
+        ))}
+      </div>
+
+      {status && (
+        <div class={`status-msg ${!isLoading ? 'status-msg-text-only' : ''}`}>
+          {status}
+        </div>
+      )}
+      
       <ResultsGrid results={results} onSelect={openPlayer} />
     </div>
   );
