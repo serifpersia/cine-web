@@ -129,6 +129,148 @@ app.get('/api/search', async (req, res) => {
     }
 });
 
+// --- VidNest Provider ---
+const VIDNEST_ALPHABET = 'RB0fpH8ZEyVLkv7c2i6MAJ5u3IKFDxlS1NTsnGaqmXYdUrtzjwObCgQP94hoeW+/=';
+
+function decodeVidnestBase64(input) {
+    if (!input || typeof input !== 'string') throw new Error('invalid payload');
+    const reverseMap = {};
+    for (let i = 0; i < VIDNEST_ALPHABET.length; i++) reverseMap[VIDNEST_ALPHABET[i]] = i;
+
+    let padded = input;
+    const mod = padded.length % 4;
+    if (mod !== 0) padded += '='.repeat(4 - mod);
+
+    const bytes = [];
+    for (let i = 0; i < padded.length; i += 4) {
+        const chunk = padded.slice(i, i + 4);
+        const c0 = reverseMap[chunk[0]] ?? 64;
+        const c1 = reverseMap[chunk[1]] ?? 64;
+        const c2 = chunk[2] === '=' ? 64 : (reverseMap[chunk[2]] ?? 64);
+        const c3 = chunk[3] === '=' ? 64 : (reverseMap[chunk[3]] ?? 64);
+        bytes.push(((c0 << 2) | (c1 >> 4)) & 0xff);
+        if (c2 !== 64) bytes.push((((c1 & 0x0f) << 4) | (c2 >> 2)) & 0xff);
+        if (c3 !== 64) bytes.push((((c2 & 0x03) << 6) | c3) & 0xff);
+    }
+    return new TextDecoder().decode(new Uint8Array(bytes));
+}
+
+function extractVidnestUrls(data) {
+    if (!data || typeof data !== 'object') return [];
+    const results = [];
+
+    const tryAdd = (url, quality, type) => {
+        if (url && typeof url === 'string' && url.startsWith('http')) {
+            const t = type || (url.includes('.m3u8') ? 'hls' : url.includes('.mp4') ? 'mp4' : 'hls');
+            results.push({ url, quality: quality || 'Auto', type: t });
+        }
+    };
+
+    // moviebox: { url: [{ link, resolution, type }] }
+    if (Array.isArray(data.url)) {
+        for (const u of data.url) tryAdd(u.link, u.resolution, u.type);
+    }
+
+    // allmovies, hollymoviehd: { streams: [{ url, type, language }] }
+    // delta: { streams: [{ url, type, language }] }
+    if (Array.isArray(data.streams)) {
+        for (const s of data.streams) tryAdd(s.url, s.quality || s.label, s.type);
+    }
+
+    // klikxxi: { sources: [{ url, quality, type }] }
+    if (Array.isArray(data.sources)) {
+        for (const s of data.sources) tryAdd(s.url, s.quality, s.type);
+    }
+
+    // onehd: { url }
+    tryAdd(data.url, null, null);
+
+    // vidlink: { data: { stream: { playlist, type, captions } } }
+    if (data.data?.stream?.playlist) {
+        tryAdd(data.data.stream.playlist, null, data.data.stream.type);
+    }
+
+    // direct fields
+    tryAdd(data.stream, null, null);
+    tryAdd(data.playlist, null, null);
+    tryAdd(data.file, null, null);
+
+    return results;
+}
+
+const VIDNEST_SERVERS = [
+    'moviebox', 'allmovies', 'catflix', 'purstream',
+    'hollymoviehd', 'lamda', 'flixhq', 'vidlink', 'onehd', 'klikxxi'
+];
+
+app.get('/api/vidnest/:type/:tmdbId', async (req, res) => {
+    const { type, tmdbId } = req.params;
+    const season = req.query.season;
+    const episode = req.query.episode;
+    const mediaType = type === 'movie' ? 'movie' : 'tv';
+
+    const headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/150 Safari/537.36',
+        Accept: 'application/json, text/javascript, */*; q=0.01',
+        Referer: 'https://vidnest.fun/',
+        Origin: 'https://vidnest.fun'
+    };
+
+    try {
+        const promises = VIDNEST_SERVERS.map(async (server) => {
+            let url = mediaType === 'movie'
+                ? `https://new.vidnest.fun/${server}/movie/${tmdbId}`
+                : `https://new.vidnest.fun/${server}/tv/${tmdbId}/${season}/${episode}`;
+            if (server === 'onehd') url += '?server=upcloud';
+
+            try {
+                const resp = await fetch(url, { headers, signal: AbortSignal.timeout(10000) });
+                if (!resp.ok) return null;
+                const json = await resp.json();
+                if (!json.data) return null;
+
+                const decoded = decodeVidnestBase64(json.data);
+                const parsed = JSON.parse(decoded);
+                const sources = extractVidnestUrls(parsed);
+                return { server, sources, raw: parsed };
+            } catch {
+                return null;
+            }
+        });
+
+        const results = await Promise.allSettled(promises);
+        const allSources = [];
+        const allSubtitles = [];
+
+        for (const result of results) {
+            if (result.status !== 'fulfilled' || !result.value) continue;
+            const { server, sources, raw } = result.value;
+            for (const s of sources) {
+                allSources.push({ ...s, server });
+            }
+
+            // Extract subtitles
+            if (raw?.data?.stream?.captions) {
+                for (const c of raw.data.stream.captions) {
+                    if (c.url && c.language) {
+                        allSubtitles.push({ url: c.url, label: c.language });
+                    }
+                }
+            }
+            if (raw?.subtitles) {
+                for (const s of raw.subtitles) {
+                    if (s.url) allSubtitles.push({ url: s.url, label: s.lang || s.language || 'Unknown' });
+                }
+            }
+        }
+
+        res.json({ sources: allSources, subtitles: allSubtitles, serverCount: results.filter(r => r.status === 'fulfilled' && r.value).length });
+    } catch (error) {
+        console.error('VidNest error:', error);
+        res.status(500).json({ error: 'VidNest fetch failed', message: error.message });
+    }
+});
+
 // --- VixSrc Provider ---
 let tmdbApiKey = process.env.TMDB_API_KEY || '';
 

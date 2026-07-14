@@ -443,6 +443,8 @@ function VideoPlayer({ url }) {
 function Player({ item, source, season, episode, qualityIdx, onClose, onSourceChange, onSeasonChange, onEpisodeChange, onQualityChange }) {
   const [vixsrcSources, setVixsrcSources] = useState([]);
   const [vixsrcReferer, setVixsrcReferer] = useState('');
+  const [vidnestSources, setVidnestSources] = useState([]);
+  const [vidrockTmdbId, setVidrockTmdbId] = useState('');
   const [streamLoading, setStreamLoading] = useState(false);
   const [streamError, setStreamError] = useState('');
 
@@ -488,13 +490,82 @@ function Player({ item, source, season, episode, qualityIdx, onClose, onSourceCh
     return () => { cancelled = true; };
   }, [item.id, source, season, episode, isMovie]);
 
-  const currentUrl = vixsrcSources[qualityIdx]?.url;
+  useEffect(() => {
+    if (source !== 'vidnest' || !item) return;
+    let cancelled = false;
+    async function load() {
+      setStreamLoading(true);
+      setStreamError('');
+      try {
+        const lookupRes = await fetch('/api/lookup/imdb-to-tmdb/' + item.id);
+        const lookup = await lookupRes.json();
+        if (cancelled) return;
+        if (!lookup.tmdbId) {
+          setStreamError('Set TMDB_API_KEY env var. Get one free at tmdb.org.');
+          setStreamLoading(false);
+          return;
+        }
+        const type = lookup.type || (isMovie ? 'movie' : 'tv');
+        let streamUrl = '/api/vidnest/' + type + '/' + lookup.tmdbId;
+        if (type === 'tv') streamUrl += '?season=' + season + '&episode=' + episode;
+        const streamRes = await fetch(streamUrl);
+        const streamData = await streamRes.json();
+        if (cancelled) return;
+        setStreamLoading(false);
+        if (!streamData.sources || !streamData.sources.length) {
+          setStreamError('No VidNest streams available.');
+          return;
+        }
+        setVidnestSources(streamData.sources);
+      } catch (err) {
+        if (!cancelled) {
+          setStreamLoading(false);
+          setStreamError('Failed to load stream.');
+          console.error(err);
+        }
+      }
+    }
+    load();
+    return () => { cancelled = true; };
+  }, [item.id, source, season, episode, isMovie]);
+
+  useEffect(() => {
+    if (source !== 'vidrock' || !item) return;
+    let cancelled = false;
+    async function load() {
+      setStreamError('');
+      try {
+        const lookupRes = await fetch('/api/lookup/imdb-to-tmdb/' + item.id);
+        const lookup = await lookupRes.json();
+        if (cancelled) return;
+        if (!lookup.tmdbId) {
+          setStreamError('Set TMDB_API_KEY env var. Get one free at tmdb.org.');
+          return;
+        }
+        setVidrockTmdbId(lookup.tmdbId);
+      } catch (err) {
+        if (!cancelled) setStreamError('Failed to get TMDB ID.');
+      }
+    }
+    load();
+    return () => { cancelled = true; };
+  }, [item.id, source, season, episode, isMovie]);
+
+  const currentUrl = source === 'vixsrc'
+    ? vixsrcSources[qualityIdx]?.url
+    : source === 'vidnest'
+      ? vidnestSources[qualityIdx]?.url
+      : '';
 
   const iframeUrl = source === 'vidsrcto'
     ? 'https://vidsrc.to/embed/' + (isMovie ? 'movie' : 'tv') + '/' + item.id + (isMovie ? '' : '/' + season + '/' + episode)
     : source === 'vidapi'
       ? 'https://vaplayer.ru/embed/' + (isMovie ? 'movie' : 'tv') + '/' + item.id + (isMovie ? '' : '/' + season + '/' + episode)
-      : '';
+      : source === 'vidrock'
+        ? (vidrockTmdbId
+          ? 'https://vidrock.ru/' + (isMovie ? 'movie' : 'tv') + '/' + vidrockTmdbId + (isMovie ? '' : '/' + season + '/' + episode)
+          : '')
+        : '';
 
   return (
     <div class="player-container">
@@ -523,6 +594,8 @@ function Player({ item, source, season, episode, qualityIdx, onClose, onSourceCh
         <label>Source
           <select value={source} onChange={onSourceChange}>
             <option value="vixsrc">VixSrc</option>
+            <option value="vidnest">VidNest</option>
+            <option value="vidrock">VidRock</option>
             <option value="vidsrcto">VidSrc.to</option>
             <option value="vidapi">VidAPI</option>
           </select>
@@ -537,15 +610,15 @@ function Player({ item, source, season, episode, qualityIdx, onClose, onSourceCh
             </label>
           </>
         )}
-        {source === 'vixsrc' && vixsrcSources.length > 0 && (
+        {(source === 'vixsrc' && vixsrcSources.length > 0) || (source === 'vidnest' && vidnestSources.length > 0) ? (
           <label>Quality
             <select value={qualityIdx} onChange={onQualityChange}>
-              {vixsrcSources.map((s, i) => (
-                <option key={i} value={i}>{s.quality}</option>
+              {(source === 'vixsrc' ? vixsrcSources : vidnestSources).map((s, i) => (
+                <option key={i} value={i}>{s.quality || 'Auto'} {s.server ? '(' + s.server + ')' : ''}</option>
               ))}
             </select>
           </label>
-        )}
+        ) : null}
         {!isMovie && (
           <div style="display: flex; gap: 8px; align-self: flex-end;">
             <button class="control-nav-btn" title="Previous Episode" onClick={() => onEpisodeChange({ target: { value: Math.max(1, episode - 1) } })}>
@@ -568,7 +641,10 @@ function Player({ item, source, season, episode, qualityIdx, onClose, onSourceCh
       {source === 'vixsrc' && currentUrl && !streamLoading && !streamError && (
         <VideoPlayer url={'/api/proxy?url=' + encodeURIComponent(currentUrl) + '&referer=' + encodeURIComponent(vixsrcReferer)} />
       )}
-      {source !== 'vixsrc' && iframeUrl && (
+      {source === 'vidnest' && currentUrl && !streamLoading && !streamError && (
+        <VideoPlayer url={'/api/proxy?url=' + encodeURIComponent(currentUrl) + '&referer=' + encodeURIComponent('https://vidnest.fun/')} />
+      )}
+      {source !== 'vixsrc' && source !== 'vidnest' && iframeUrl && (
         <iframe class="video-frame" src={iframeUrl} allowfullscreen allow="autoplay; fullscreen"></iframe>
       )}
     </div>
