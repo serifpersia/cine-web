@@ -6,13 +6,14 @@ Search and stream movies and TV shows through IMDB lookup.
 
 ```bash
 npm install
+npm run dev     # Vite + Express concurrently
 npm run build   # build frontend
-npm start       # start server at http://localhost:3000
+npm start       # start server at http://localhost:3001
 ```
 
 Or double-click `run.bat` (Windows) / `./run.sh` (Linux/macOS) and pick:
-- **1** — Production (localhost:3000)
-- **2** — Dev mode with hot reload (localhost:5173)
+- **1** — Dev mode with hot reload (localhost:5173)
+- **2** — Production (localhost:3001)
 
 ## Dev
 

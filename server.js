@@ -5,7 +5,7 @@ const freekeys = require('freekeys');
 
 const app = express();
 const cache = new NodeCache();
-const port = 3000;
+const port = 3001;
 
 const IMDB_SUGGEST_URL = 'https://v3.sg.media-imdb.com/suggestion/x';
 const TV_TYPES = new Set(['tvSeries', 'tvMiniSeries', 'movie']); // Including movies for better utility
