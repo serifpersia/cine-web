@@ -36,7 +36,16 @@ html {
 }
 
 body {
-  font-family: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+  font-family:
+    'Inter',
+    system-ui,
+    -apple-system,
+    BlinkMacSystemFont,
+    'Segoe UI',
+    Roboto,
+    Oxygen,
+    Ubuntu,
+    sans-serif;
   background-color: var(--bg);
   background-image: radial-gradient(circle at 50% 0%, #18181b 0%, #08080a 100%);
   background-attachment: fixed;
@@ -177,7 +186,9 @@ body {
 .search-container:focus-within {
   border-color: rgba(255, 255, 255, 0.2);
   background: var(--card-hover);
-  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.1), var(--shadow-lg);
+  box-shadow:
+    0 0 0 1px rgba(255, 255, 255, 0.1),
+    var(--shadow-lg);
 }
 
 .search-icon-svg {
@@ -258,7 +269,9 @@ body {
 }
 
 @keyframes spin {
-  to { transform: rotate(360deg); }
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 .player-container {
@@ -384,7 +397,7 @@ body {
   border-color: var(--border-hover);
 }
 
-.controls input[type="number"] {
+.controls input[type='number'] {
   width: 60px;
   text-align: center;
 }
@@ -439,7 +452,10 @@ body {
   overflow: hidden;
   cursor: pointer;
   border: 1px solid var(--border);
-  transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1), border-color 0.3s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.3s ease;
+  transition:
+    transform 0.3s cubic-bezier(0.16, 1, 0.3, 1),
+    border-color 0.3s cubic-bezier(0.16, 1, 0.3, 1),
+    box-shadow 0.3s ease;
   position: relative;
   display: flex;
   flex-direction: column;
@@ -662,7 +678,12 @@ body {
   bottom: 0;
   left: 0;
   right: 0;
-  background: linear-gradient(to top, rgba(10, 10, 12, 0.95) 0%, rgba(10, 10, 12, 0.7) 70%, transparent 100%);
+  background: linear-gradient(
+    to top,
+    rgba(10, 10, 12, 0.95) 0%,
+    rgba(10, 10, 12, 0.7) 70%,
+    transparent 100%
+  );
   backdrop-filter: blur(20px);
   -webkit-backdrop-filter: blur(20px);
   border: 1px solid rgba(255, 255, 255, 0.08);
@@ -789,18 +810,20 @@ body {
   gap: 4px;
 }
 
-.volume-container input[type="range"] {
+.volume-container input[type='range'] {
   width: 0;
   opacity: 0;
   accent-color: var(--primary);
   height: 3px;
-  transition: width 0.15s ease, opacity 0.15s ease;
+  transition:
+    width 0.15s ease,
+    opacity 0.15s ease;
   -webkit-appearance: none;
   appearance: none;
 }
 
-.volume-container:hover input[type="range"],
-.volume-container input[type="range"]:focus {
+.volume-container:hover input[type='range'],
+.volume-container input[type='range']:focus {
   width: 60px;
   opacity: 1;
 }
@@ -853,7 +876,7 @@ body {
   appearance: none;
 }
 
-.cc-popup input[type="range"] {
+.cc-popup input[type='range'] {
   width: 110px;
   accent-color: var(--primary);
   -webkit-appearance: none;
@@ -874,7 +897,7 @@ body {
   font-weight: 600;
 }
 
-.cc-toggle input[type="checkbox"] {
+.cc-toggle input[type='checkbox'] {
   accent-color: var(--primary);
   cursor: pointer;
   width: 18px;

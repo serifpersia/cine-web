@@ -7,6 +7,8 @@
     "dev": "concurrently -k \"node server.js\" \"vite\"",
     "build": "vite build",
     "start": "node server.js",
+    "lint": "eslint src --ext js,jsx,cjs && prettier --check src",
+    "format": "prettier --write src",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [],
@@ -23,6 +25,14 @@
     "zimmerframe": "^1.1.4"
   },
   "devDependencies": {
-    "@preact/preset-vite": "^2.10.6"
+    "@babel/core": "^8.0.1",
+    "@babel/eslint-parser": "^8.0.1",
+    "@babel/preset-react": "^8.0.1",
+    "@preact/preset-vite": "^2.10.6",
+    "eslint": "^8.57.1",
+    "eslint-plugin-react": "^7.37.5",
+    "eslint-plugin-react-hooks": "^7.1.1",
+    "globals": "^17.7.0",
+    "prettier": "^3.9.6"
   }
 }
