@@ -36,7 +36,7 @@ function SearchBar({ value, onChange, onSearch }) {
 }
 
 function ResultCard({ item, onSelect }) {
-  const isTV = item.type === 'tvSeries' || item.type === 'tvMiniSeries' || item.type === 'tv';
+  const isTV = item.type === 'tv' || item.type === 'tvSeries' || item.type === 'tvMiniSeries';
   return (
     <div class="result-item" onClick={() => onSelect(item)}>
       <div class="result-poster-wrapper">
@@ -440,15 +440,71 @@ function VideoPlayer({ url }) {
   );
 }
 
+const WATCHSERIES_PROVIDERS = {
+  vaplayer: { name: 'VidAPI', url: (id, type, s, e) =>
+    type === 'movie' ? `https://vaplayer.ru/embed/movie/${id}` : `https://vaplayer.ru/embed/tv/${id}/${s}/${e}`
+  },
+  embedmaster: { name: 'EmbedMaster', url: (id, type, s, e) =>
+    type === 'movie' ? `https://embedmaster.link/movie/${id}` : `https://embedmaster.link/tv/${id}/${s}/${e}`
+  },
+  vidsrccc: { name: 'VidSrc.cc', url: (id, type, s, e) =>
+    type === 'movie' ? `https://vidsrc.cc/v2/embed/movie/${id}` : `https://vidsrc.cc/v2/embed/tv/${id}/${s}/${e}`
+  },
+  vidfast: { name: 'VidFast', url: (id, type, s, e) =>
+    type === 'movie' ? `https://vidfast.pro/movie/${id}` : `https://vidfast.pro/tv/${id}/${s}/${e}`
+  },
+  vidsrcembed: { name: 'VidSrc Embed', url: (id, type, s, e) =>
+    type === 'movie' ? `https://vidsrc-embed.ru/embed/movie/${id}` : `https://vidsrc-embed.ru/embed/tv/${id}/${s}/${e}`
+  },
+  videasy: { name: 'Videoasy', url: (id, type, s, e) =>
+    type === 'movie' ? `https://player.videasy.net/movie/${id}` : `https://player.videasy.net/tv/${id}/${s}/${e}`
+  },
+};
+
 function Player({ item, source, season, episode, qualityIdx, onClose, onSourceChange, onSeasonChange, onEpisodeChange, onQualityChange }) {
   const [vixsrcSources, setVixsrcSources] = useState([]);
   const [vixsrcReferer, setVixsrcReferer] = useState('');
   const [vidnestSources, setVidnestSources] = useState([]);
-  const [vidrockTmdbId, setVidrockTmdbId] = useState('');
   const [streamLoading, setStreamLoading] = useState(false);
   const [streamError, setStreamError] = useState('');
 
+  const [tmdbSeasons, setTmdbSeasons] = useState([]);
+  const [tmdbEpisodes, setTmdbEpisodes] = useState([]);
+
   const isMovie = item.type === 'movie';
+  const isEmbedProvider = ['vaplayer', 'embedmaster', 'vidsrccc', 'vidfast', 'vidsrcembed', 'videasy', 'vidsrcto', 'vidrock'].includes(source);
+
+  // Fetch TMDB seasons info for TV shows
+  useEffect(() => {
+    if (isMovie) return;
+    let cancelled = false;
+    async function load() {
+      try {
+        const r = await fetch(`/api/tmdb/details/tv/${item.id}`);
+        const d = await r.json();
+        if (cancelled) return;
+        if (d.seasons) setTmdbSeasons(d.seasons);
+      } catch (e) { /* ignore */ }
+    }
+    load();
+    return () => { cancelled = true; };
+  }, [item.id, isMovie]);
+
+  // Fetch episodes for current season
+  useEffect(() => {
+    if (isMovie) return;
+    let cancelled = false;
+    async function load() {
+      try {
+        const r = await fetch(`/api/tmdb/episodes/${item.id}/${season}`);
+        const d = await r.json();
+        if (cancelled) return;
+        if (d.episodes) setTmdbEpisodes(d.episodes);
+      } catch (e) { /* ignore */ }
+    }
+    load();
+    return () => { cancelled = true; };
+  }, [item.id, season, isMovie]);
 
   useEffect(() => {
     if (source !== 'vixsrc' || !item) return;
@@ -457,16 +513,8 @@ function Player({ item, source, season, episode, qualityIdx, onClose, onSourceCh
       setStreamLoading(true);
       setStreamError('');
       try {
-        const lookupRes = await fetch('/api/lookup/imdb-to-tmdb/' + item.id);
-        const lookup = await lookupRes.json();
-        if (cancelled) return;
-        if (!lookup.tmdbId) {
-          setStreamError('Set TMDB_API_KEY env var for VixSrc. Get one free at tmdb.org.');
-          setStreamLoading(false);
-          return;
-        }
-        const type = lookup.type || (isMovie ? 'movie' : 'tv');
-        let streamUrl = '/api/vixsrc/' + type + '/' + lookup.tmdbId;
+        const type = isMovie ? 'movie' : 'tv';
+        let streamUrl = '/api/vixsrc/' + type + '/' + item.id;
         if (type === 'tv') streamUrl += '?season=' + season + '&episode=' + episode;
         const streamRes = await fetch(streamUrl);
         const streamData = await streamRes.json();
@@ -497,16 +545,8 @@ function Player({ item, source, season, episode, qualityIdx, onClose, onSourceCh
       setStreamLoading(true);
       setStreamError('');
       try {
-        const lookupRes = await fetch('/api/lookup/imdb-to-tmdb/' + item.id);
-        const lookup = await lookupRes.json();
-        if (cancelled) return;
-        if (!lookup.tmdbId) {
-          setStreamError('Set TMDB_API_KEY env var. Get one free at tmdb.org.');
-          setStreamLoading(false);
-          return;
-        }
-        const type = lookup.type || (isMovie ? 'movie' : 'tv');
-        let streamUrl = '/api/vidnest/' + type + '/' + lookup.tmdbId;
+        const type = isMovie ? 'movie' : 'tv';
+        let streamUrl = '/api/vidnest/' + type + '/' + item.id;
         if (type === 'tv') streamUrl += '?season=' + season + '&episode=' + episode;
         const streamRes = await fetch(streamUrl);
         const streamData = await streamRes.json();
@@ -529,42 +569,19 @@ function Player({ item, source, season, episode, qualityIdx, onClose, onSourceCh
     return () => { cancelled = true; };
   }, [item.id, source, season, episode, isMovie]);
 
-  useEffect(() => {
-    if (source !== 'vidrock' || !item) return;
-    let cancelled = false;
-    async function load() {
-      setStreamError('');
-      try {
-        const lookupRes = await fetch('/api/lookup/imdb-to-tmdb/' + item.id);
-        const lookup = await lookupRes.json();
-        if (cancelled) return;
-        if (!lookup.tmdbId) {
-          setStreamError('Set TMDB_API_KEY env var. Get one free at tmdb.org.');
-          return;
-        }
-        setVidrockTmdbId(lookup.tmdbId);
-      } catch (err) {
-        if (!cancelled) setStreamError('Failed to get TMDB ID.');
-      }
-    }
-    load();
-    return () => { cancelled = true; };
-  }, [item.id, source, season, episode, isMovie]);
-
   const currentUrl = source === 'vixsrc'
     ? vixsrcSources[qualityIdx]?.url
     : source === 'vidnest'
       ? vidnestSources[qualityIdx]?.url
       : '';
 
-  const iframeUrl = source === 'vidsrcto'
-    ? 'https://vidsrc.to/embed/' + (isMovie ? 'movie' : 'tv') + '/' + item.id + (isMovie ? '' : '/' + season + '/' + episode)
-    : source === 'vidapi'
-      ? 'https://vaplayer.ru/embed/' + (isMovie ? 'movie' : 'tv') + '/' + item.id + (isMovie ? '' : '/' + season + '/' + episode)
+  const embedProvider = WATCHSERIES_PROVIDERS[source];
+  const iframeUrl = embedProvider
+    ? embedProvider.url(item.id, isMovie ? 'movie' : 'tv', season, episode)
+    : source === 'vidsrcto'
+      ? 'https://vidsrc.to/embed/' + (isMovie ? 'movie' : 'tv') + '/' + item.id + (isMovie ? '' : '/' + season + '/' + episode)
       : source === 'vidrock'
-        ? (vidrockTmdbId
-          ? 'https://vidrock.ru/' + (isMovie ? 'movie' : 'tv') + '/' + vidrockTmdbId + (isMovie ? '' : '/' + season + '/' + episode)
-          : '')
+        ? 'https://vidrock.ru/' + (isMovie ? 'movie' : 'tv') + '/' + item.id + (isMovie ? '' : '/' + season + '/' + episode)
         : '';
 
   return (
@@ -593,20 +610,49 @@ function Player({ item, source, season, episode, qualityIdx, onClose, onSourceCh
       <div class="controls">
         <label>Source
           <select value={source} onChange={onSourceChange}>
-            <option value="vixsrc">VixSrc</option>
-            <option value="vidnest">VidNest</option>
-            <option value="vidrock">VidRock</option>
-            <option value="vidsrcto">VidSrc.to</option>
-            <option value="vidapi">VidAPI</option>
+            <optgroup label="WatchSeries Providers">
+              <option value="vaplayer">VidAPI (vaplayer)</option>
+              <option value="embedmaster">EmbedMaster</option>
+              <option value="vidsrccc">VidSrc.cc</option>
+              <option value="vidfast">VidFast</option>
+              <option value="vidsrcembed">VidSrc Embed</option>
+              <option value="videasy">Videoasy</option>
+            </optgroup>
+            <optgroup label="Other Providers">
+              <option value="vixsrc">VixSrc (HLS)</option>
+              <option value="vidnest">VidNest (HLS)</option>
+              <option value="vidsrcto">VidSrc.to</option>
+              <option value="vidrock">VidRock</option>
+            </optgroup>
           </select>
         </label>
         {!isMovie && (
           <>
             <label>Season
-              <input type="number" value={season} min="1" onChange={onSeasonChange} />
+              <select value={season} onChange={onSeasonChange}>
+                {tmdbSeasons.length > 0 ? tmdbSeasons.map(s => (
+                  <option key={s.season_number} value={s.season_number}>
+                    Season {s.season_number} ({s.episode_count} ep)
+                  </option>
+                )) : (
+                  [...Array(20)].map((_, i) => (
+                    <option key={i + 1} value={i + 1}>Season {i + 1}</option>
+                  ))
+                )}
+              </select>
             </label>
             <label>Episode
-              <input type="number" value={episode} min="1" onChange={onEpisodeChange} />
+              <select value={episode} onChange={onEpisodeChange}>
+                {tmdbEpisodes.length > 0 ? tmdbEpisodes.map(ep => (
+                  <option key={ep.episode_number} value={ep.episode_number}>
+                    Ep {ep.episode_number} - {ep.name || ''}
+                  </option>
+                )) : (
+                  [...Array(50)].map((_, i) => (
+                    <option key={i + 1} value={i + 1}>Episode {i + 1}</option>
+                  ))
+                )}
+              </select>
             </label>
           </>
         )}
@@ -644,7 +690,13 @@ function Player({ item, source, season, episode, qualityIdx, onClose, onSourceCh
       {source === 'vidnest' && currentUrl && !streamLoading && !streamError && (
         <VideoPlayer url={'/api/proxy?url=' + encodeURIComponent(currentUrl) + '&referer=' + encodeURIComponent('https://vidnest.fun/')} />
       )}
-      {source !== 'vixsrc' && source !== 'vidnest' && iframeUrl && (
+      {isEmbedProvider && iframeUrl && (
+        <iframe class="video-frame" src={iframeUrl} allowfullscreen allow="autoplay; fullscreen"></iframe>
+      )}
+      {source === 'vidsrcto' && iframeUrl && (
+        <iframe class="video-frame" src={iframeUrl} allowfullscreen allow="autoplay; fullscreen"></iframe>
+      )}
+      {source === 'vidrock' && iframeUrl && (
         <iframe class="video-frame" src={iframeUrl} allowfullscreen allow="autoplay; fullscreen"></iframe>
       )}
     </div>
@@ -681,7 +733,7 @@ export default function App() {
     setStatus('Searching for "' + q + '"...');
     setResults([]);
     try {
-      const res = await fetch('/api/search?q=' + encodeURIComponent(q));
+      const res = await fetch('/api/tmdb/search?q=' + encodeURIComponent(q));
       const data = await res.json();
       setIsLoading(false);
       setStatus(data.length ? '' : 'No results found. Try a different title.');
@@ -699,7 +751,7 @@ export default function App() {
     setStatus('Searching for "' + tag + '"...');
     setResults([]);
     try {
-      const res = await fetch('/api/search?q=' + encodeURIComponent(tag));
+      const res = await fetch('/api/tmdb/search?q=' + encodeURIComponent(tag));
       const data = await res.json();
       setIsLoading(false);
       setStatus(data.length ? '' : 'No results found. Try a different title.');
@@ -712,10 +764,16 @@ export default function App() {
   };
 
   const openPlayer = (item, s, e) => {
-    setCurrentItem(item);
+    const merged = { ...item, season: s || item.season || 1 };
+    setCurrentItem(merged);
     setSeason(s || item.season || 1);
     setEpisode(e || 1);
     setQualityIdx(0);
+  };
+
+  const isTVItem = (item) => {
+    if (!item) return false;
+    return item.type === 'tv' || item.type === 'tvSeries' || item.type === 'tvMiniSeries';
   };
 
   const closePlayer = () => {
@@ -732,11 +790,12 @@ export default function App() {
     if (id && type && title) {
       const s = params.has('s') ? Number(params.get('s')) : 1;
       const e = params.has('e') ? Number(params.get('e')) : 1;
-      const src = params.get('src') || 'vixsrc';
+      const src = params.get('src') || 'vaplayer';
+      const image = params.get('image') || '';
       setSource(src);
       setSeason(s);
       setEpisode(e);
-      setCurrentItem({ id, type, title, season: s });
+      setCurrentItem({ id, type, title, season: s, image });
     }
   }, []);
 
@@ -746,24 +805,22 @@ export default function App() {
     params.set('id', currentItem.id);
     params.set('type', currentItem.type);
     params.set('title', currentItem.title);
-    if (currentItem.type !== 'movie') {
+    if (currentItem.image) params.set('image', currentItem.image);
+    if (isTVItem(currentItem)) {
       params.set('s', season);
       params.set('e', episode);
     }
     params.set('src', source);
-    window.history.replaceState(
-      { id: currentItem.id, type: currentItem.type, season, episode, source },
-      '',
-      '?' + params.toString()
-    );
-    document.title = currentItem.title + (currentItem.type !== 'movie' ? ' S' + season + 'E' + episode : '') + ' - cineweb';
+    const state = { id: currentItem.id, type: currentItem.type, season, episode, source, title: currentItem.title, image: currentItem.image };
+    window.history.replaceState(state, '', '?' + params.toString());
+    document.title = currentItem.title + (isTVItem(currentItem) ? ' S' + season + 'E' + episode : '') + ' - cineweb';
   }, [currentItem, source, season, episode]);
 
   useEffect(() => {
     const onPop = (e) => {
       if (e.state && e.state.id) {
-        setCurrentItem({ id: e.state.id, type: e.state.type, title: e.state.title || '' });
-        setSource(e.state.source || 'vixsrc');
+        setCurrentItem({ id: e.state.id, type: e.state.type, title: e.state.title || '', image: e.state.image || '' });
+        setSource(e.state.source || 'vaplayer');
         setSeason(e.state.season || 1);
         setEpisode(e.state.episode || 1);
       } else {

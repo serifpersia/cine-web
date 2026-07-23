@@ -6,6 +6,24 @@ const freekeys = require('freekeys');
 const app = express();
 const cache = new NodeCache();
 const port = 3001;
+const TMDB_BASE = 'https://api.themoviedb.org/3';
+let tmdbApiKey = process.env.TMDB_API_KEY || '';
+
+async function ensureTmdbKey() {
+    if (tmdbApiKey) return tmdbApiKey;
+    try {
+        const keys = await freekeys();
+        tmdbApiKey = keys.tmdb_key;
+    } catch (e) {
+        console.warn('[TMDB] Failed to fetch free API key:', e.message);
+    }
+    if (!tmdbApiKey) {
+        tmdbApiKey = '9e7096a7575623aa30c66e9cc987e411';
+        console.warn('[TMDB] Using fallback key');
+    }
+    return tmdbApiKey;
+}
+const TMDB_IMAGE = 'https://image.tmdb.org/t/p/w500';
 
 const IMDB_SUGGEST_URL = 'https://v3.sg.media-imdb.com/suggestion/x';
 const TV_TYPES = new Set(['tvSeries', 'tvMiniSeries', 'movie']); // Including movies for better utility
@@ -127,6 +145,93 @@ app.get('/api/search', async (req, res) => {
         console.error('Search error:', error);
         res.status(500).json({ error: 'Search failed' });
     }
+});
+
+// --- TMDB Search (like watchseriestv.net) ---
+app.get('/api/tmdb/search', async (req, res) => {
+  const query = req.query.q || '';
+  if (!query) return res.json([]);
+  const page = parseInt(req.query.page) || 1;
+  const cacheKey = `tmdb-search-${query.toLowerCase()}-${page}`;
+  const cached = cache.get(cacheKey);
+  if (cached) return res.json(cached);
+  const key = await ensureTmdbKey();
+  if (!key) return res.status(500).json({ error: 'No TMDB API key available' });
+  try {
+    const r = await fetch(`${TMDB_BASE}/search/multi?api_key=${key}&query=${encodeURIComponent(query)}&page=${page}`, {
+      headers: { 'User-Agent': 'Mozilla/5.0' }
+    });
+    if (!r.ok) return res.status(500).json({ error: 'TMDB search failed' });
+    const d = await r.json();
+    const results = d.results
+      .filter(item => item.media_type !== 'person')
+      .map(item => ({
+        id: item.id,
+        title: item.title || item.name,
+        year: (item.release_date || item.first_air_date || '').split('-')[0],
+        type: item.media_type,
+        image: item.poster_path ? `${TMDB_IMAGE}${item.poster_path}` : '',
+        vote_average: item.vote_average,
+      }));
+    cache.set(cacheKey, results, 3600);
+    res.json(results);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// TMDB details endpoint (returns seasons/episodes info)
+app.get('/api/tmdb/details/:type/:id', async (req, res) => {
+  const { type, id } = req.params;
+  const key = await ensureTmdbKey();
+  if (!key) return res.status(500).json({ error: 'No TMDB API key available' });
+  try {
+    const r = await fetch(`${TMDB_BASE}/${type}/${id}?api_key=${key}`, {
+      headers: { 'User-Agent': 'Mozilla/5.0' }
+    });
+    if (!r.ok) return res.status(500).json({ error: 'TMDB details failed' });
+    const d = await r.json();
+    const result = {
+      id: d.id,
+      title: d.title || d.name,
+      overview: d.overview,
+      vote_average: d.vote_average,
+      year: (d.release_date || d.first_air_date || '').split('-')[0],
+      poster: d.poster_path ? `${TMDB_IMAGE}${d.poster_path}` : '',
+    };
+    if (type === 'tv') {
+      result.seasons = (d.seasons || []).filter(s => s.season_number > 0).map(s => ({
+        season_number: s.season_number,
+        episode_count: s.episode_count,
+      }));
+      result.number_of_seasons = d.number_of_seasons;
+    }
+    res.json(result);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// TMDB season episodes endpoint
+app.get('/api/tmdb/episodes/:id/:season', async (req, res) => {
+  const { id, season } = req.params;
+  const key = await ensureTmdbKey();
+  if (!key) return res.status(500).json({ error: 'No TMDB API key available' });
+  try {
+    const r = await fetch(`${TMDB_BASE}/tv/${id}/season/${season}?api_key=${key}`, {
+      headers: { 'User-Agent': 'Mozilla/5.0' }
+    });
+    if (!r.ok) return res.status(500).json({ error: 'TMDB episodes failed' });
+    const d = await r.json();
+    const episodes = (d.episodes || []).map(ep => ({
+      episode_number: ep.episode_number,
+      name: ep.name,
+      vote_average: ep.vote_average,
+    }));
+    res.json({ episodes });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
 });
 
 // --- VidNest Provider ---
@@ -270,20 +375,6 @@ app.get('/api/vidnest/:type/:tmdbId', async (req, res) => {
         res.status(500).json({ error: 'VidNest fetch failed', message: error.message });
     }
 });
-
-// --- VixSrc Provider ---
-let tmdbApiKey = process.env.TMDB_API_KEY || '';
-
-async function ensureTmdbKey() {
-    if (tmdbApiKey) return tmdbApiKey;
-    try {
-        const keys = await freekeys();
-        tmdbApiKey = keys.tmdb_key;
-    } catch (e) {
-        console.warn('[TMDB] Failed to fetch free API key:', e.message);
-    }
-    return tmdbApiKey;
-}
 
 app.get('/api/lookup/imdb-to-tmdb/:imdbId', async (req, res) => {
     const key = await ensureTmdbKey();
