@@ -138,6 +138,42 @@ function VideoPlayer({ url }) {
     hideTimerRef.current = setTimeout(() => setShowControls(false), 3000);
   };
 
+  const updateProgress = (video) => {
+    if (!video || !video.duration) return;
+    const pct = (video.currentTime / video.duration) * 100;
+    if (progressPlayedRef.current) progressPlayedRef.current.style.width = pct + '%';
+    if (progressThumbRef.current) progressThumbRef.current.style.left = pct + '%';
+    if (video.buffered.length > 0) {
+      const end = video.buffered.end(video.buffered.length - 1);
+      const bufPct = (end / video.duration) * 100;
+      if (progressBufferRef.current) progressBufferRef.current.style.width = bufPct + '%';
+    }
+    if (timeDisplayRef.current) {
+      timeDisplayRef.current.textContent =
+        formatTime(video.currentTime) + ' / ' + formatTime(video.duration);
+    }
+  };
+
+  const updateSubTracks = (hls) => {
+    if (!hls || !hls.subtitleTracks) return;
+    setSubTracks(hls.subtitleTracks);
+  };
+
+  const applySubPos = () => {
+    const pos = 95 - subPos;
+    const video = videoRef.current;
+    if (!video) return;
+    for (let i = 0; i < video.textTracks.length; i++) {
+      const tt = video.textTracks[i];
+      if (tt.kind !== 'subtitles' && tt.kind !== 'captions') continue;
+      for (let j = 0; j < tt.cues.length; j++) {
+        const cue = tt.cues[j];
+        cue.snapToLines = false;
+        cue.line = pos;
+      }
+    }
+  };
+
   useEffect(() => {
     if (!url) return;
     const video = videoRef.current;
@@ -212,42 +248,6 @@ function VideoPlayer({ url }) {
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [url]);
-
-  const updateProgress = (video) => {
-    if (!video || !video.duration) return;
-    const pct = (video.currentTime / video.duration) * 100;
-    if (progressPlayedRef.current) progressPlayedRef.current.style.width = pct + '%';
-    if (progressThumbRef.current) progressThumbRef.current.style.left = pct + '%';
-    if (video.buffered.length > 0) {
-      const end = video.buffered.end(video.buffered.length - 1);
-      const bufPct = (end / video.duration) * 100;
-      if (progressBufferRef.current) progressBufferRef.current.style.width = bufPct + '%';
-    }
-    if (timeDisplayRef.current) {
-      timeDisplayRef.current.textContent =
-        formatTime(video.currentTime) + ' / ' + formatTime(video.duration);
-    }
-  };
-
-  const updateSubTracks = (hls) => {
-    if (!hls || !hls.subtitleTracks) return;
-    setSubTracks(hls.subtitleTracks);
-  };
-
-  const applySubPos = () => {
-    const pos = 95 - subPos;
-    const video = videoRef.current;
-    if (!video) return;
-    for (let i = 0; i < video.textTracks.length; i++) {
-      const tt = video.textTracks[i];
-      if (tt.kind !== 'subtitles' && tt.kind !== 'captions') continue;
-      for (let j = 0; j < tt.cues.length; j++) {
-        const cue = tt.cues[j];
-        cue.snapToLines = false;
-        cue.line = pos;
-      }
-    }
-  };
 
   const togglePlay = () => {
     const video = videoRef.current;
@@ -726,7 +726,7 @@ function Player({
         const d = await r.json();
         if (cancelled) return;
         if (d.seasons) setTmdbSeasons(d.seasons);
-      } catch (e) {}
+      } catch {}
     }
     load();
     return () => {
@@ -743,7 +743,7 @@ function Player({
         const d = await r.json();
         if (cancelled) return;
         if (d.episodes) setTmdbEpisodes(d.episodes);
-      } catch (e) {}
+      } catch {}
     }
     load();
     return () => {
