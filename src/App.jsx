@@ -702,6 +702,7 @@ function Player({
 
   const [tmdbSeasons, setTmdbSeasons] = useState([]);
   const [tmdbEpisodes, setTmdbEpisodes] = useState([]);
+  const [resolvedUrl, setResolvedUrl] = useState('');
 
   const isMovie = item.type === 'movie';
   const isEmbedProvider = [
@@ -841,6 +842,17 @@ function Player({
           item.id +
           (isMovie ? '' : '/' + season + '/' + episode)
         : '';
+
+  useEffect(() => {
+    if (!isEmbedProvider || !iframeUrl) return;
+    setResolvedUrl('');
+    fetch('/api/resolve?url=' + encodeURIComponent(iframeUrl))
+      .then((r) => r.json())
+      .then((data) => {
+        if (data.finalUrl) setResolvedUrl(data.finalUrl);
+      })
+      .catch((e) => console.error('Resolve failed', e));
+  }, [isEmbedProvider, iframeUrl]);
 
   return (
     <div class="player-container">
@@ -1010,30 +1022,15 @@ function Player({
           }
         />
       )}
-      {isEmbedProvider && iframeUrl && (
-        <iframe
-          class="video-frame"
-          src={iframeUrl}
-          allowfullscreen
-          allow="autoplay; fullscreen"
-        ></iframe>
-      )}
-      {source === 'vidsrcto' && iframeUrl && (
-        <iframe
-          class="video-frame"
-          src={iframeUrl}
-          allowfullscreen
-          allow="autoplay; fullscreen"
-        ></iframe>
-      )}
-      {source === 'vidrock' && iframeUrl && (
-        <iframe
-          class="video-frame"
-          src={iframeUrl}
-          allowfullscreen
-          allow="autoplay; fullscreen"
-        ></iframe>
-      )}
+      {(isEmbedProvider || source === 'vidsrcto' || source === 'vidrock') &&
+        (resolvedUrl || iframeUrl) && (
+          <iframe
+            class="video-frame"
+            src={resolvedUrl || iframeUrl}
+            allowFullScreen
+            allow="autoplay; fullscreen"
+          ></iframe>
+        )}
     </div>
   );
 }

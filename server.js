@@ -548,6 +548,73 @@ app.get('/api/proxy', async (req, res) => {
     }
 });
 
+app.get('/api/resolve', async (req, res) => {
+    const { url } = req.query;
+    if (!url) return res.status(400).json({ error: 'Missing url' });
+    try {
+        const r = await fetch(url, {
+            redirect: 'follow',
+            headers: {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+                Referer: 'https://embedmaster.link/',
+            }
+        });
+        res.json({ finalUrl: r.url, status: r.status });
+    } catch (e) {
+        res.json({ finalUrl: url, error: e.message });
+    }
+});
+
+// Proxy the full embed page (option 1)
+app.get('/api/proxy/embed', async (req, res) => {
+    const { url } = req.query;
+    if (!url) return res.status(400).json({ error: 'Missing url' });
+    try {
+        const r = await fetch(url, {
+            redirect: 'follow',
+            headers: {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+                Referer: 'https://embedmaster.link/',
+                Origin: 'https://embedmaster.link',
+                Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+            }
+        });
+        const html = await r.text();
+        // Rewrite relative URLs to absolute via our proxy
+        const base = new URL(url);
+        const proxyBase = `${req.protocol}://${req.get('host')}`;
+        const rewritten = html
+            .replace(/(src|href)=(["'])\//g, (m, attr, q) => `${attr}=${q}${proxyBase}/api/proxy/asset?url=${encodeURIComponent(base.origin)}&path=`)
+            .replace(/(src|href)=(["'])(?!https?:\/\/)(?!\/\/)(?!data:)([^"']+)/g, (m, attr, q, path) => {
+                const absolute = new URL(path, url).href;
+                return `${attr}=${q}${proxyBase}/api/proxy/asset?url=${encodeURIComponent(absolute)}`;
+            });
+        res.set('Content-Type', 'text/html');
+        res.send(rewritten);
+    } catch (e) {
+        res.status(500).send('Proxy error: ' + e.message);
+    }
+});
+
+app.get('/api/proxy/asset', async (req, res) => {
+    const { url } = req.query;
+    if (!url) return res.status(400).json({ error: 'Missing url' });
+    try {
+        const r = await fetch(url, {
+            headers: {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+                Referer: 'https://embedmaster.link/',
+            }
+        });
+        const contentType = r.headers.get('content-type') || 'application/octet-stream';
+        res.set('Content-Type', contentType);
+        const buf = await r.arrayBuffer();
+        res.send(Buffer.from(buf));
+    } catch (e) {
+        res.status(500).send('Asset proxy error');
+    }
+});
+
 app.listen(port, () => {
     console.log(`Server running at http://localhost:${port}`);
 });
