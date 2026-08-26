@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from 'preact/hooks';
+import { useState, useRef, useEffect, useCallback } from 'preact/hooks';
 
 function formatTime(t) {
   if (!t || !isFinite(t)) return '0:00';
@@ -31,7 +31,7 @@ function SearchBar({ value, onChange, onSearch }) {
           placeholder="Search movies or shows..."
           value={value}
           onInput={(e) => onChange(e.target.value)}
-          onKeyPress={(e) => {
+          onKeyDown={(e) => {
             if (e.key === 'Enter') onSearch();
           }}
         />
@@ -119,7 +119,6 @@ function VideoPlayer({ url }) {
   const wrapperRef = useRef(null);
   const hideTimerRef = useRef(null);
 
-  const [, setShowControls] = useState(true);
   const [playing, setPlaying] = useState(false);
   const [volume, setVolume] = useState(1);
   const [muted, setMuted] = useState(false);
@@ -128,14 +127,19 @@ function VideoPlayer({ url }) {
   const [subTrack, setSubTrack] = useState(-1);
   const [subSize, setSubSize] = useState(100);
   const [subPos, setSubPos] = useState(0);
-  const [, setAudioTracks] = useState([]);
-  const [, setCurAudio] = useState(0);
   const [subTracks, setSubTracks] = useState([]);
 
-  const initControls = () => {
-    setShowControls(true);
+  const showControlsTemporarily = () => {
+    const wrapper = wrapperRef.current;
+    if (!wrapper) return;
+    wrapper.classList.add('show-controls');
     clearTimeout(hideTimerRef.current);
-    hideTimerRef.current = setTimeout(() => setShowControls(false), 3000);
+    const video = videoRef.current;
+    if (video && !video.paused) {
+      hideTimerRef.current = setTimeout(() => {
+        wrapper.classList.remove('show-controls');
+      }, 2500);
+    }
   };
 
   const updateProgress = (video) => {
@@ -159,7 +163,7 @@ function VideoPlayer({ url }) {
     setSubTracks(hls.subtitleTracks);
   };
 
-  const applySubPos = () => {
+  const applySubPos = useCallback(() => {
     const pos = 95 - subPos;
     const video = videoRef.current;
     if (!video) return;
@@ -172,7 +176,7 @@ function VideoPlayer({ url }) {
         cue.line = pos;
       }
     }
-  };
+  }, [subPos]);
 
   useEffect(() => {
     if (!url) return;
@@ -180,44 +184,52 @@ function VideoPlayer({ url }) {
     if (!video) return;
     let hls = null;
 
-    if (window.Hls && Hls.isSupported()) {
-      hls = new Hls({ subtitleDisplay: true });
+    const isMp4 = url.includes('.mp4') && !url.includes('.m3u8');
+
+    if (isMp4) {
+      if (hlsRef.current) {
+        hlsRef.current.destroy();
+        hlsRef.current = null;
+      }
+      video.controls = false;
+      video.src = url;
+      showControlsTemporarily();
+      video.play().catch(() => {});
+    } else if (window.Hls && window.Hls.isSupported()) {
+      hls = new window.Hls({ subtitleDisplay: true });
       hlsRef.current = hls;
       video.controls = false;
       video.removeAttribute('src');
       hls.loadSource(url);
       hls.attachMedia(video);
 
-      hls.on(Hls.Events.MANIFEST_PARSED, () => {
-        initControls();
+      const selectEnglishAudio = () => {
+        if (!hls.audioTracks || !hls.audioTracks.length) return;
+        const eng = hls.audioTracks.findIndex((t) => t.lang && /^(eng|en)/i.test(t.lang));
+        const idx = eng >= 0 ? eng : 0;
+        hls.audioTrack = idx;
+      };
+
+      hls.on(window.Hls.Events.MANIFEST_PARSED, () => {
+        showControlsTemporarily();
+        selectEnglishAudio();
         video.play().catch(() => {});
-        if (hls.audioTracks && hls.audioTracks.length) {
-          setAudioTracks(hls.audioTracks);
-          const eng = hls.audioTracks.findIndex((t) => t.lang && t.lang.startsWith('eng'));
-          const idx = eng >= 0 ? eng : 0;
-          hls.audioTrack = idx;
-          setCurAudio(idx);
-        }
         updateSubTracks(hls);
       });
 
-      hls.on(Hls.Events.AUDIO_TRACKS_UPDATED, () => {
-        if (hls.audioTracks) {
-          setAudioTracks(hls.audioTracks);
-          const eng = hls.audioTracks.findIndex((t) => t.lang && t.lang.startsWith('eng'));
-          if (eng >= 0 && hls.audioTrack !== eng) {
-            hls.audioTrack = eng;
-            setCurAudio(eng);
-          }
-        }
-      });
+      if (window.Hls.Events.AUDIO_TRACKS_UPDATED) {
+        hls.on(window.Hls.Events.AUDIO_TRACKS_UPDATED, () => {
+          selectEnglishAudio();
+        });
+      }
 
-      hls.on(Hls.Events.SUBTITLE_TRACKS_UPDATED, () => updateSubTracks(hls));
-      hls.on(Hls.Events.CUES_PARSED, () => applySubPos());
+      hls.on(window.Hls.Events.SUBTITLE_TRACKS_UPDATED, () => updateSubTracks(hls));
+      hls.on(window.Hls.Events.CUES_PARSED, () => applySubPos());
     } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
-      video.controls = true;
+      video.controls = false;
       video.src = url;
-      video.play();
+      showControlsTemporarily();
+      video.play().catch(() => {});
     }
 
     const onTime = () => updateProgress(video);
@@ -226,8 +238,14 @@ function VideoPlayer({ url }) {
     const onPlay = () => {
       setPlaying(true);
       updateProgress(video);
+      showControlsTemporarily();
     };
-    const onPause = () => setPlaying(false);
+    const onPause = () => {
+      setPlaying(false);
+      const wrapper = wrapperRef.current;
+      if (wrapper) wrapper.classList.add('show-controls');
+      clearTimeout(hideTimerRef.current);
+    };
 
     video.addEventListener('timeupdate', onTime);
     video.addEventListener('loadedmetadata', onLoad);
@@ -246,19 +264,21 @@ function VideoPlayer({ url }) {
         hlsRef.current = null;
       }
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [url]);
+  }, [url, applySubPos]);
 
   const togglePlay = () => {
     const video = videoRef.current;
     if (!video) return;
-    if (video.paused) video.play().catch(() => {});
-    else video.pause();
+    if (video.paused) {
+      video.play().catch(() => {});
+    } else {
+      video.pause();
+    }
   };
 
   const seek = (e) => {
     const video = videoRef.current;
-    if (!video) return;
+    if (!video || !video.duration) return;
     const rect = e.currentTarget.getBoundingClientRect();
     const x = (e.clientX - rect.left) / rect.width;
     video.currentTime = x * video.duration;
@@ -275,13 +295,8 @@ function VideoPlayer({ url }) {
   useEffect(() => {
     const wrapper = wrapperRef.current;
     if (!wrapper) return;
-    const onMove = () => {
-      wrapper.classList.add('show-controls');
-      clearTimeout(hideTimerRef.current);
-      if (videoRef.current && !videoRef.current.paused) {
-        hideTimerRef.current = setTimeout(() => wrapper.classList.remove('show-controls'), 3000);
-      }
-    };
+
+    const onMove = () => showControlsTemporarily();
     const onLeave = () => {
       if (videoRef.current && !videoRef.current.paused) {
         wrapper.classList.remove('show-controls');
@@ -294,21 +309,19 @@ function VideoPlayer({ url }) {
     const onClick = (e) => {
       if (e.target.closest('.custom-controls')) return;
       const isShowing = wrapper.classList.contains('show-controls');
-      if (isShowing) {
+      if (isShowing && videoRef.current && !videoRef.current.paused) {
         wrapper.classList.remove('show-controls');
         clearTimeout(hideTimerRef.current);
       } else {
-        wrapper.classList.add('show-controls');
-        clearTimeout(hideTimerRef.current);
-        if (videoRef.current && !videoRef.current.paused) {
-          hideTimerRef.current = setTimeout(() => wrapper.classList.remove('show-controls'), 3000);
-        }
+        showControlsTemporarily();
       }
     };
+
     wrapper.addEventListener('mousemove', onMove);
     wrapper.addEventListener('mouseleave', onLeave);
     wrapper.addEventListener('dblclick', onDbl);
     wrapper.addEventListener('click', onClick);
+
     return () => {
       wrapper.removeEventListener('mousemove', onMove);
       wrapper.removeEventListener('mouseleave', onLeave);
@@ -323,21 +336,17 @@ function VideoPlayer({ url }) {
       return;
     }
     const hls = hlsRef.current;
-    const sel = document.getElementById('cc-track-select');
-    if (!sel) return;
     const eng = hls.subtitleTracks
       ? hls.subtitleTracks.findIndex((t) => t.lang && t.lang.startsWith('eng'))
       : -1;
     const idx = eng >= 0 ? eng : hls.subtitleTracks && hls.subtitleTracks.length > 0 ? 0 : -1;
-    sel.value = idx;
     hls.subtitleTrack = idx;
     setSubTrack(idx);
   }, [subEnabled]);
 
   useEffect(() => {
     applySubPos();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [subPos]);
+  }, [subPos, applySubPos]);
 
   return (
     <div class="video-wrapper show-controls" ref={wrapperRef}>
@@ -347,6 +356,7 @@ function VideoPlayer({ url }) {
         onClick={(e) => {
           e.stopPropagation();
           togglePlay();
+          showControlsTemporarily();
         }}
       >
         {playing ? (
@@ -587,10 +597,9 @@ function VideoPlayer({ url }) {
           <label>
             Track:
             <select
-              id="cc-track-select"
               value={subTrack}
               onChange={(e) => {
-                const idx = parseInt(e.target.value);
+                const idx = parseInt(e.target.value, 10);
                 setSubTrack(idx);
                 setSubEnabled(idx >= 0);
                 if (hlsRef.current) hlsRef.current.subtitleTrack = idx;
@@ -627,7 +636,7 @@ function VideoPlayer({ url }) {
               max="95"
               value={subPos}
               onInput={(e) => {
-                setSubPos(parseInt(e.target.value));
+                setSubPos(parseInt(e.target.value, 10));
               }}
             />
           </label>
@@ -638,26 +647,12 @@ function VideoPlayer({ url }) {
 }
 
 const WATCHSERIES_PROVIDERS = {
-  vaplayer: {
-    name: 'VidAPI',
-    url: (id, type, s, e) =>
-      type === 'movie'
-        ? `https://vaplayer.ru/embed/movie/${id}`
-        : `https://vaplayer.ru/embed/tv/${id}/${s}/${e}`,
-  },
   embedmaster: {
     name: 'EmbedMaster',
     url: (id, type, s, e) =>
       type === 'movie'
         ? `https://embedmaster.link/movie/${id}`
         : `https://embedmaster.link/tv/${id}/${s}/${e}`,
-  },
-  vidsrccc: {
-    name: 'VidSrc.cc',
-    url: (id, type, s, e) =>
-      type === 'movie'
-        ? `https://vidsrc.cc/v2/embed/movie/${id}`
-        : `https://vidsrc.cc/v2/embed/tv/${id}/${s}/${e}`,
   },
   vidfast: {
     name: 'VidFast',
@@ -666,19 +661,12 @@ const WATCHSERIES_PROVIDERS = {
         ? `https://vidfast.pro/movie/${id}`
         : `https://vidfast.pro/tv/${id}/${s}/${e}`,
   },
-  vidsrcembed: {
-    name: 'VidSrc Embed',
-    url: (id, type, s, e) =>
-      type === 'movie'
-        ? `https://vidsrc-embed.ru/embed/movie/${id}`
-        : `https://vidsrc-embed.ru/embed/tv/${id}/${s}/${e}`,
-  },
   videasy: {
-    name: 'Videoasy',
+    name: 'VidEasy',
     url: (id, type, s, e) =>
       type === 'movie'
-        ? `https://player.videasy.net/movie/${id}`
-        : `https://player.videasy.net/tv/${id}/${s}/${e}`,
+        ? `https://player.videasy.to/movie/${id}?overlay=true`
+        : `https://player.videasy.to/tv/${id}/${s}/${e}?episodeSelector=true&overlay=true`,
   },
 };
 
@@ -696,28 +684,22 @@ function Player({
 }) {
   const [vixsrcSources, setVixsrcSources] = useState([]);
   const [vixsrcReferer, setVixsrcReferer] = useState('');
-  const [vidnestSources, setVidnestSources] = useState([]);
+  const [movybzSources, setMovybzSources] = useState([]);
   const [streamLoading, setStreamLoading] = useState(false);
   const [streamError, setStreamError] = useState('');
 
   const [tmdbSeasons, setTmdbSeasons] = useState([]);
   const [tmdbEpisodes, setTmdbEpisodes] = useState([]);
   const [resolvedUrl, setResolvedUrl] = useState('');
+  const [sourceTypeFilter, setSourceTypeFilter] = useState('all');
 
   const isMovie = item.type === 'movie';
-  const isEmbedProvider = [
-    'vaplayer',
-    'embedmaster',
-    'vidsrccc',
-    'vidfast',
-    'vidsrcembed',
-    'videasy',
-    'vidsrcto',
-    'vidrock',
-  ].includes(source);
+  const isDirectHls = source === 'movybz' || source === 'vixsrc';
+  const isEmbedProvider = ['embedmaster', 'vidfast', 'vidrock', 'videasy'].includes(source);
 
   const maxEpisodes = tmdbEpisodes.length || Number.MAX_SAFE_INTEGER;
 
+  // TMDB TV Seasons
   useEffect(() => {
     if (isMovie) return;
     let cancelled = false;
@@ -735,6 +717,7 @@ function Player({
     };
   }, [item.id, isMovie]);
 
+  // TMDB Episodes
   useEffect(() => {
     if (isMovie) return;
     let cancelled = false;
@@ -752,16 +735,60 @@ function Player({
     };
   }, [item.id, season, isMovie]);
 
+  // Movy.bz Sources
+  useEffect(() => {
+    if (source !== 'movybz' || !item) return;
+    let cancelled = false;
+    async function load() {
+      setStreamLoading(true);
+      setStreamError('');
+      setMovybzSources([]);
+      try {
+        const type = isMovie ? 'movie' : 'tv';
+        const params = new URLSearchParams({
+          title: item.title || '',
+          year: item.year || '',
+          season: String(season),
+          episode: String(episode),
+          totalSeasons: String(tmdbSeasons?.length || 1),
+          imdbId: item.imdb_id || '',
+        });
+        const streamRes = await fetch(`/api/movybz/${type}/${item.id}?${params.toString()}`);
+        const streamData = await streamRes.json();
+        if (cancelled) return;
+        setStreamLoading(false);
+        if (!streamData.sources || !streamData.sources.length) {
+          setStreamError(streamData.error || 'No Movy.bz streams available.');
+          return;
+        }
+        setMovybzSources(streamData.sources);
+        setSourceTypeFilter('all');
+      } catch (err) {
+        if (!cancelled) {
+          setStreamLoading(false);
+          setStreamError('Failed to load Movy.bz stream.');
+          console.error(err);
+        }
+      }
+    }
+    load();
+    return () => {
+      cancelled = true;
+    };
+  }, [item, source, season, episode, isMovie, tmdbSeasons]);
+
+  // VixSrc Sources
   useEffect(() => {
     if (source !== 'vixsrc' || !item) return;
     let cancelled = false;
     async function load() {
       setStreamLoading(true);
       setStreamError('');
+      setVixsrcSources([]);
       try {
         const type = isMovie ? 'movie' : 'tv';
-        let streamUrl = '/api/vixsrc/' + type + '/' + item.id;
-        if (type === 'tv') streamUrl += '?season=' + season + '&episode=' + episode;
+        let streamUrl = `/api/vixsrc/${type}/${item.id}`;
+        if (type === 'tv') streamUrl += `?season=${season}&episode=${episode}`;
         const streamRes = await fetch(streamUrl);
         const streamData = await streamRes.json();
         if (cancelled) return;
@@ -784,64 +811,23 @@ function Player({
     return () => {
       cancelled = true;
     };
-  }, [item, item.id, source, season, episode, isMovie]);
+  }, [item, source, season, episode, isMovie]);
 
-  useEffect(() => {
-    if (source !== 'vidnest' || !item) return;
-    let cancelled = false;
-    async function load() {
-      setStreamLoading(true);
-      setStreamError('');
-      try {
-        const type = isMovie ? 'movie' : 'tv';
-        let streamUrl = '/api/vidnest/' + type + '/' + item.id;
-        if (type === 'tv') streamUrl += '?season=' + season + '&episode=' + episode;
-        const streamRes = await fetch(streamUrl);
-        const streamData = await streamRes.json();
-        if (cancelled) return;
-        setStreamLoading(false);
-        if (!streamData.sources || !streamData.sources.length) {
-          setStreamError('No VidNest streams available.');
-          return;
-        }
-        setVidnestSources(streamData.sources);
-      } catch (err) {
-        if (!cancelled) {
-          setStreamLoading(false);
-          setStreamError('Failed to load stream.');
-          console.error(err);
-        }
-      }
-    }
-    load();
-    return () => {
-      cancelled = true;
-    };
-  }, [item, item.id, source, season, episode, isMovie]);
-
+  const currentSources =
+    source === 'movybz' ? movybzSources : source === 'vixsrc' ? vixsrcSources : [];
+  const filteredSources =
+    sourceTypeFilter === 'all'
+      ? currentSources
+      : currentSources.filter((s) => s.type === sourceTypeFilter);
   const currentUrl =
-    source === 'vixsrc'
-      ? vixsrcSources[qualityIdx]?.url
-      : source === 'vidnest'
-        ? vidnestSources[qualityIdx]?.url
-        : '';
+    (sourceTypeFilter === 'all' ? currentSources : filteredSources)[qualityIdx]?.url || '';
 
   const embedProvider = WATCHSERIES_PROVIDERS[source];
   const iframeUrl = embedProvider
     ? embedProvider.url(item.id, isMovie ? 'movie' : 'tv', season, episode)
-    : source === 'vidsrcto'
-      ? 'https://vidsrc.to/embed/' +
-        (isMovie ? 'movie' : 'tv') +
-        '/' +
-        item.id +
-        (isMovie ? '' : '/' + season + '/' + episode)
-      : source === 'vidrock'
-        ? 'https://vidrock.ru/' +
-          (isMovie ? 'movie' : 'tv') +
-          '/' +
-          item.id +
-          (isMovie ? '' : '/' + season + '/' + episode)
-        : '';
+    : source === 'vidrock'
+      ? `https://vidrock.ru/${isMovie ? 'movie' : 'tv'}/${item.id}${isMovie ? '' : `/${season}/${episode}`}`
+      : '';
 
   useEffect(() => {
     if (!isEmbedProvider || !iframeUrl) return;
@@ -890,18 +876,16 @@ function Player({
         <label>
           Source
           <select value={source} onChange={onSourceChange}>
-            <optgroup label="WatchSeries Providers">
-              <option value="vaplayer">VidAPI (vaplayer)</option>
-              <option value="embedmaster">EmbedMaster</option>
-              <option value="vidsrccc">VidSrc.cc</option>
-              <option value="vidfast">VidFast</option>
-              <option value="vidsrcembed">VidSrc Embed</option>
-              <option value="videasy">Videoasy</option>
-            </optgroup>
-            <optgroup label="Other Providers">
+            <optgroup label="Direct HLS Stream Providers">
+              <option value="movybz">Movy.bz (4K HLS)</option>
               <option value="vixsrc">VixSrc (HLS)</option>
-              <option value="vidnest">VidNest (HLS)</option>
-              <option value="vidsrcto">VidSrc.to</option>
+            </optgroup>
+            <optgroup label="WatchSeries Embeds">
+              <option value="embedmaster">EmbedMaster</option>
+              <option value="vidfast">VidFast</option>
+              <option value="videasy">VidEasy</option>
+            </optgroup>
+            <optgroup label="Other Embeds">
               <option value="vidrock">VidRock</option>
             </optgroup>
           </select>
@@ -942,18 +926,39 @@ function Player({
             </label>
           </>
         )}
-        {(source === 'vixsrc' && vixsrcSources.length > 0) ||
-        (source === 'vidnest' && vidnestSources.length > 0) ? (
-          <label>
-            Quality
-            <select value={qualityIdx} onChange={onQualityChange}>
-              {(source === 'vixsrc' ? vixsrcSources : vidnestSources).map((s, i) => (
-                <option key={i} value={i}>
-                  {s.quality || 'Auto'} {s.server ? '(' + s.server + ')' : ''}
-                </option>
-              ))}
-            </select>
-          </label>
+        {isDirectHls && currentSources.length > 0 ? (
+          <>
+            {(() => {
+              const types = [...new Set(currentSources.map((s) => s.type).filter(Boolean))];
+              return types.length > 1 ? (
+                <label>
+                  Type
+                  <select
+                    value={sourceTypeFilter}
+                    onChange={(e) => {
+                      setSourceTypeFilter(e.target.value);
+                      onQualityChange({ target: { value: 0 } });
+                    }}
+                  >
+                    <option value="all">All</option>
+                    {types.includes('hls') && <option value="hls">HLS</option>}
+                    {types.includes('mp4') && <option value="mp4">MP4</option>}
+                  </select>
+                </label>
+              ) : null;
+            })()}
+            <label>
+              Quality
+              <select value={qualityIdx} onChange={onQualityChange}>
+                {(sourceTypeFilter === 'all' ? currentSources : filteredSources).map((s, i) => (
+                  <option key={i} value={i}>
+                    {s.quality || 'Auto'}
+                    {s.type ? ` (${s.type.toUpperCase()})` : ''}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </>
         ) : null}
         {!isMovie && (
           <div style="display: flex; gap: 6px; align-self: flex-end;">
@@ -1002,35 +1007,27 @@ function Player({
       {streamLoading && <div class="status-msg">Loading stream...</div>}
       {streamError && <div class="status-msg status-msg-text-only">{streamError}</div>}
 
-      {source === 'vixsrc' && currentUrl && !streamLoading && !streamError && (
+      {/* Direct HLS Video Player */}
+      {isDirectHls && currentUrl && !streamLoading && !streamError && (
         <VideoPlayer
           url={
             '/api/proxy?url=' +
             encodeURIComponent(currentUrl) +
             '&referer=' +
-            encodeURIComponent(vixsrcReferer)
+            encodeURIComponent(source === 'movybz' ? 'https://www.movy.bz/' : vixsrcReferer)
           }
         />
       )}
-      {source === 'vidnest' && currentUrl && !streamLoading && !streamError && (
-        <VideoPlayer
-          url={
-            '/api/proxy?url=' +
-            encodeURIComponent(currentUrl) +
-            '&referer=' +
-            encodeURIComponent('https://vidnest.fun/')
-          }
-        />
+
+      {/* Embed Providers */}
+      {isEmbedProvider && (resolvedUrl || iframeUrl) && (
+        <iframe
+          class="video-frame"
+          src={resolvedUrl || iframeUrl}
+          allowFullScreen
+          allow="autoplay; fullscreen"
+        ></iframe>
       )}
-      {(isEmbedProvider || source === 'vidsrcto' || source === 'vidrock') &&
-        (resolvedUrl || iframeUrl) && (
-          <iframe
-            class="video-frame"
-            src={resolvedUrl || iframeUrl}
-            allowFullScreen
-            allow="autoplay; fullscreen"
-          ></iframe>
-        )}
     </div>
   );
 }
@@ -1053,7 +1050,7 @@ export default function App() {
   const [status, setStatus] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [currentItem, setCurrentItem] = useState(null);
-  const [source, setSource] = useState('vixsrc');
+  const [source, setSource] = useState('movybz');
   const [season, setSeason] = useState(1);
   const [episode, setEpisode] = useState(1);
   const [qualityIdx, setQualityIdx] = useState(0);
@@ -1122,7 +1119,7 @@ export default function App() {
     if (id && type && title) {
       const s = params.has('s') ? Number(params.get('s')) : 1;
       const e = params.has('e') ? Number(params.get('e')) : 1;
-      const src = params.get('src') || 'vaplayer';
+      const src = params.get('src') || 'movybz';
       const image = params.get('image') || '';
       setSource(src);
       setSeason(s);
@@ -1168,7 +1165,7 @@ export default function App() {
           title: e.state.title || '',
           image: e.state.image || '',
         });
-        setSource(e.state.source || 'vaplayer');
+        setSource(e.state.source || 'movybz');
         setSeason(e.state.season || 1);
         setEpisode(e.state.episode || 1);
       } else {
@@ -1215,12 +1212,12 @@ export default function App() {
               setSource(e.target.value);
               setQualityIdx(0);
             }}
-            onSeasonChange={(e) => setSeason(parseInt(e.target.value) || 1)}
+            onSeasonChange={(e) => setSeason(parseInt(e.target.value, 10) || 1)}
             onEpisodeChange={(e) => {
-              const val = parseInt(e.target.value);
+              const val = parseInt(e.target.value, 10);
               if (val >= 1) setEpisode(val);
             }}
-            onQualityChange={(e) => setQualityIdx(parseInt(e.target.value))}
+            onQualityChange={(e) => setQualityIdx(parseInt(e.target.value, 10))}
           />
         )}
 

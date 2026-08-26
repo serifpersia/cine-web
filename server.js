@@ -2,6 +2,7 @@ const express = require('express');
 const NodeCache = require('node-cache');
 const path = require('path');
 const freekeys = require('freekeys');
+const zlib = require('zlib');
 
 const app = express();
 const cache = new NodeCache();
@@ -26,12 +27,12 @@ async function ensureTmdbKey() {
 const TMDB_IMAGE = 'https://image.tmdb.org/t/p/w500';
 
 const IMDB_SUGGEST_URL = 'https://v3.sg.media-imdb.com/suggestion/x';
-const TV_TYPES = new Set(['tvSeries', 'tvMiniSeries', 'movie']); // Including movies for better utility
+const TV_TYPES = new Set(['tvSeries', 'tvMiniSeries', 'movie']);
 
 app.use(express.static(path.join(__dirname, 'dist')));
 app.use(express.json());
 
-// Helper functions ported from TS
+// ── Helper Functions ──────────────────────────────────────────────────
 function toValidSeason(value) {
     const season = Number(value);
     return Number.isInteger(season) && season >= 1 && season <= 99 ? season : undefined;
@@ -84,14 +85,15 @@ function scoreTitleMatch(queryTitles, title) {
     );
 }
 
+// ── IMDb / Fallback Search ─────────────────────────────────────────────
 app.get('/api/search', async (req, res) => {
     const query = req.query.q || '';
     if (!query) return res.json([]);
 
     const rawTitle = query.trim();
-    const rawTitles = [rawTitle]; // Simplified aliases for now
+    const rawTitles = [rawTitle];
     const parsedTitleMap = new Map();
-    
+
     rawTitles.forEach(title => {
         const parsed = extractTitleAndSeason(title);
         const key = parsed.title.toLowerCase();
@@ -127,7 +129,7 @@ app.get('/api/search', async (req, res) => {
         );
 
         const matches = uniqueSuggestions
-            .filter((entry) => !!entry.id && !!entry.l && (TV_TYPES.has(entry.qid) || entry.qid === 'movie'))
+            .filter((entry) => Boolean(entry.id && entry.l) && (TV_TYPES.has(entry.qid) || entry.qid === 'movie'))
             .sort((left, right) => scoreTitleMatch(queryTitles, right.l) - scoreTitleMatch(queryTitles, left.l))
             .slice(0, 10)
             .map((entry) => ({
@@ -147,232 +149,89 @@ app.get('/api/search', async (req, res) => {
     }
 });
 
-// --- TMDB Search (like watchseriestv.net) ---
+// ── TMDB Endpoints ─────────────────────────────────────────────────────
 app.get('/api/tmdb/search', async (req, res) => {
-  const query = req.query.q || '';
-  if (!query) return res.json([]);
-  const page = parseInt(req.query.page) || 1;
-  const cacheKey = `tmdb-search-${query.toLowerCase()}-${page}`;
-  const cached = cache.get(cacheKey);
-  if (cached) return res.json(cached);
-  const key = await ensureTmdbKey();
-  if (!key) return res.status(500).json({ error: 'No TMDB API key available' });
-  try {
-    const r = await fetch(`${TMDB_BASE}/search/multi?api_key=${key}&query=${encodeURIComponent(query)}&page=${page}`, {
-      headers: { 'User-Agent': 'Mozilla/5.0' }
-    });
-    if (!r.ok) return res.status(500).json({ error: 'TMDB search failed' });
-    const d = await r.json();
-    const results = d.results
-      .filter(item => item.media_type !== 'person')
-      .map(item => ({
-        id: item.id,
-        title: item.title || item.name,
-        year: (item.release_date || item.first_air_date || '').split('-')[0],
-        type: item.media_type,
-        image: item.poster_path ? `${TMDB_IMAGE}${item.poster_path}` : '',
-        vote_average: item.vote_average,
-      }));
-    cache.set(cacheKey, results, 3600);
-    res.json(results);
-  } catch (e) {
-    res.status(500).json({ error: e.message });
-  }
-});
-
-// TMDB details endpoint (returns seasons/episodes info)
-app.get('/api/tmdb/details/:type/:id', async (req, res) => {
-  const { type, id } = req.params;
-  const key = await ensureTmdbKey();
-  if (!key) return res.status(500).json({ error: 'No TMDB API key available' });
-  try {
-    const r = await fetch(`${TMDB_BASE}/${type}/${id}?api_key=${key}`, {
-      headers: { 'User-Agent': 'Mozilla/5.0' }
-    });
-    if (!r.ok) return res.status(500).json({ error: 'TMDB details failed' });
-    const d = await r.json();
-    const result = {
-      id: d.id,
-      title: d.title || d.name,
-      overview: d.overview,
-      vote_average: d.vote_average,
-      year: (d.release_date || d.first_air_date || '').split('-')[0],
-      poster: d.poster_path ? `${TMDB_IMAGE}${d.poster_path}` : '',
-    };
-    if (type === 'tv') {
-      result.seasons = (d.seasons || []).filter(s => s.season_number > 0).map(s => ({
-        season_number: s.season_number,
-        episode_count: s.episode_count,
-      }));
-      result.number_of_seasons = d.number_of_seasons;
-    }
-    res.json(result);
-  } catch (e) {
-    res.status(500).json({ error: e.message });
-  }
-});
-
-// TMDB season episodes endpoint
-app.get('/api/tmdb/episodes/:id/:season', async (req, res) => {
-  const { id, season } = req.params;
-  const key = await ensureTmdbKey();
-  if (!key) return res.status(500).json({ error: 'No TMDB API key available' });
-  try {
-    const r = await fetch(`${TMDB_BASE}/tv/${id}/season/${season}?api_key=${key}`, {
-      headers: { 'User-Agent': 'Mozilla/5.0' }
-    });
-    if (!r.ok) return res.status(500).json({ error: 'TMDB episodes failed' });
-    const d = await r.json();
-    const episodes = (d.episodes || []).map(ep => ({
-      episode_number: ep.episode_number,
-      name: ep.name,
-      vote_average: ep.vote_average,
-    }));
-    res.json({ episodes });
-  } catch (e) {
-    res.status(500).json({ error: e.message });
-  }
-});
-
-// --- VidNest Provider ---
-const VIDNEST_ALPHABET = 'RB0fpH8ZEyVLkv7c2i6MAJ5u3IKFDxlS1NTsnGaqmXYdUrtzjwObCgQP94hoeW+/=';
-
-function decodeVidnestBase64(input) {
-    if (!input || typeof input !== 'string') throw new Error('invalid payload');
-    const reverseMap = {};
-    for (let i = 0; i < VIDNEST_ALPHABET.length; i++) reverseMap[VIDNEST_ALPHABET[i]] = i;
-
-    let padded = input;
-    const mod = padded.length % 4;
-    if (mod !== 0) padded += '='.repeat(4 - mod);
-
-    const bytes = [];
-    for (let i = 0; i < padded.length; i += 4) {
-        const chunk = padded.slice(i, i + 4);
-        const c0 = reverseMap[chunk[0]] ?? 64;
-        const c1 = reverseMap[chunk[1]] ?? 64;
-        const c2 = chunk[2] === '=' ? 64 : (reverseMap[chunk[2]] ?? 64);
-        const c3 = chunk[3] === '=' ? 64 : (reverseMap[chunk[3]] ?? 64);
-        bytes.push(((c0 << 2) | (c1 >> 4)) & 0xff);
-        if (c2 !== 64) bytes.push((((c1 & 0x0f) << 4) | (c2 >> 2)) & 0xff);
-        if (c3 !== 64) bytes.push((((c2 & 0x03) << 6) | c3) & 0xff);
-    }
-    return new TextDecoder().decode(new Uint8Array(bytes));
-}
-
-function extractVidnestUrls(data) {
-    if (!data || typeof data !== 'object') return [];
-    const results = [];
-
-    const tryAdd = (url, quality, type) => {
-        if (url && typeof url === 'string' && url.startsWith('http')) {
-            const t = type || (url.includes('.m3u8') ? 'hls' : url.includes('.mp4') ? 'mp4' : 'hls');
-            results.push({ url, quality: quality || 'Auto', type: t });
-        }
-    };
-
-    // moviebox: { url: [{ link, resolution, type }] }
-    if (Array.isArray(data.url)) {
-        for (const u of data.url) tryAdd(u.link, u.resolution, u.type);
-    }
-
-    // allmovies, hollymoviehd: { streams: [{ url, type, language }] }
-    // delta: { streams: [{ url, type, language }] }
-    if (Array.isArray(data.streams)) {
-        for (const s of data.streams) tryAdd(s.url, s.quality || s.label, s.type);
-    }
-
-    // klikxxi: { sources: [{ url, quality, type }] }
-    if (Array.isArray(data.sources)) {
-        for (const s of data.sources) tryAdd(s.url, s.quality, s.type);
-    }
-
-    // onehd: { url }
-    tryAdd(data.url, null, null);
-
-    // vidlink: { data: { stream: { playlist, type, captions } } }
-    if (data.data?.stream?.playlist) {
-        tryAdd(data.data.stream.playlist, null, data.data.stream.type);
-    }
-
-    // direct fields
-    tryAdd(data.stream, null, null);
-    tryAdd(data.playlist, null, null);
-    tryAdd(data.file, null, null);
-
-    return results;
-}
-
-const VIDNEST_SERVERS = [
-    'moviebox', 'allmovies', 'catflix', 'purstream',
-    'hollymoviehd', 'lamda', 'flixhq', 'vidlink', 'onehd', 'klikxxi'
-];
-
-app.get('/api/vidnest/:type/:tmdbId', async (req, res) => {
-    const { type, tmdbId } = req.params;
-    const season = req.query.season;
-    const episode = req.query.episode;
-    const mediaType = type === 'movie' ? 'movie' : 'tv';
-
-    const headers = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/150 Safari/537.36',
-        Accept: 'application/json, text/javascript, */*; q=0.01',
-        Referer: 'https://vidnest.fun/',
-        Origin: 'https://vidnest.fun'
-    };
-
+    const query = req.query.q || '';
+    if (!query) return res.json([]);
+    const page = parseInt(req.query.page, 10) || 1;
+    const cacheKey = `tmdb-search-${query.toLowerCase()}-${page}`;
+    const cached = cache.get(cacheKey);
+    if (cached) return res.json(cached);
+    const key = await ensureTmdbKey();
+    if (!key) return res.status(500).json({ error: 'No TMDB API key available' });
     try {
-        const promises = VIDNEST_SERVERS.map(async (server) => {
-            let url = mediaType === 'movie'
-                ? `https://new.vidnest.fun/${server}/movie/${tmdbId}`
-                : `https://new.vidnest.fun/${server}/tv/${tmdbId}/${season}/${episode}`;
-            if (server === 'onehd') url += '?server=upcloud';
-
-            try {
-                const resp = await fetch(url, { headers, signal: AbortSignal.timeout(10000) });
-                if (!resp.ok) return null;
-                const json = await resp.json();
-                if (!json.data) return null;
-
-                const decoded = decodeVidnestBase64(json.data);
-                const parsed = JSON.parse(decoded);
-                const sources = extractVidnestUrls(parsed);
-                return { server, sources, raw: parsed };
-            } catch {
-                return null;
-            }
+        const r = await fetch(`${TMDB_BASE}/search/multi?api_key=${key}&query=${encodeURIComponent(query)}&page=${page}`, {
+            headers: { 'User-Agent': 'Mozilla/5.0' }
         });
+        if (!r.ok) return res.status(500).json({ error: 'TMDB search failed' });
+        const d = await r.json();
+        const results = (d.results || [])
+            .filter(item => item.media_type !== 'person')
+            .map(item => ({
+                id: item.id,
+                title: item.title || item.name,
+                year: (item.release_date || item.first_air_date || '').split('-')[0],
+                type: item.media_type,
+                image: item.poster_path ? `${TMDB_IMAGE}${item.poster_path}` : '',
+                vote_average: item.vote_average,
+            }));
+        cache.set(cacheKey, results, 3600);
+        res.json(results);
+    } catch (e) {
+        res.status(500).json({ error: e.message });
+    }
+});
 
-        const results = await Promise.allSettled(promises);
-        const allSources = [];
-        const allSubtitles = [];
-
-        for (const result of results) {
-            if (result.status !== 'fulfilled' || !result.value) continue;
-            const { server, sources, raw } = result.value;
-            for (const s of sources) {
-                allSources.push({ ...s, server });
-            }
-
-            // Extract subtitles
-            if (raw?.data?.stream?.captions) {
-                for (const c of raw.data.stream.captions) {
-                    if (c.url && c.language) {
-                        allSubtitles.push({ url: c.url, label: c.language });
-                    }
-                }
-            }
-            if (raw?.subtitles) {
-                for (const s of raw.subtitles) {
-                    if (s.url) allSubtitles.push({ url: s.url, label: s.lang || s.language || 'Unknown' });
-                }
-            }
+app.get('/api/tmdb/details/:type/:id', async (req, res) => {
+    const { type, id } = req.params;
+    const key = await ensureTmdbKey();
+    if (!key) return res.status(500).json({ error: 'No TMDB API key available' });
+    try {
+        const r = await fetch(`${TMDB_BASE}/${type}/${id}?api_key=${key}&append_to_response=external_ids`, {
+            headers: { 'User-Agent': 'Mozilla/5.0' }
+        });
+        if (!r.ok) return res.status(500).json({ error: 'TMDB details failed' });
+        const d = await r.json();
+        const result = {
+            id: d.id,
+            imdb_id: d.external_ids?.imdb_id || d.imdb_id || null,
+            title: d.title || d.name,
+            overview: d.overview,
+            vote_average: d.vote_average,
+            year: (d.release_date || d.first_air_date || '').split('-')[0],
+            poster: d.poster_path ? `${TMDB_IMAGE}${d.poster_path}` : '',
+        };
+        if (type === 'tv') {
+            result.seasons = (d.seasons || []).filter(s => s.season_number > 0).map(s => ({
+                season_number: s.season_number,
+                episode_count: s.episode_count,
+            }));
+            result.number_of_seasons = d.number_of_seasons;
         }
+        res.json(result);
+    } catch (e) {
+        res.status(500).json({ error: e.message });
+    }
+});
 
-        res.json({ sources: allSources, subtitles: allSubtitles, serverCount: results.filter(r => r.status === 'fulfilled' && r.value).length });
-    } catch (error) {
-        console.error('VidNest error:', error);
-        res.status(500).json({ error: 'VidNest fetch failed', message: error.message });
+app.get('/api/tmdb/episodes/:id/:season', async (req, res) => {
+    const { id, season } = req.params;
+    const key = await ensureTmdbKey();
+    if (!key) return res.status(500).json({ error: 'No TMDB API key available' });
+    try {
+        const r = await fetch(`${TMDB_BASE}/tv/${id}/season/${season}?api_key=${key}`, {
+            headers: { 'User-Agent': 'Mozilla/5.0' }
+        });
+        if (!r.ok) return res.status(500).json({ error: 'TMDB episodes failed' });
+        const d = await r.json();
+        const episodes = (d.episodes || []).map(ep => ({
+            episode_number: ep.episode_number,
+            name: ep.name,
+            vote_average: ep.vote_average,
+        }));
+        res.json({ episodes });
+    } catch (e) {
+        res.status(500).json({ error: e.message });
     }
 });
 
@@ -380,7 +239,7 @@ app.get('/api/lookup/imdb-to-tmdb/:imdbId', async (req, res) => {
     const key = await ensureTmdbKey();
     if (!key) return res.json({ tmdbId: null, error: 'No TMDB API key available' });
     try {
-        const r = await fetch(`https://api.themoviedb.org/3/find/${req.params.imdbId}?api_key=${key}&external_source=imdb_id`, {
+        const r = await fetch(`${TMDB_BASE}/find/${req.params.imdbId}?api_key=${key}&external_source=imdb_id`, {
             headers: { 'User-Agent': 'Mozilla/5.0' }
         });
         if (!r.ok) return res.json({ tmdbId: null, error: `TMDB error ${r.status}` });
@@ -399,6 +258,7 @@ app.get('/api/lookup/imdb-to-tmdb/:imdbId', async (req, res) => {
     }
 });
 
+// ── VixSrc Provider ────────────────────────────────────────────────────
 app.get('/api/vixsrc/:type/:tmdbId', async (req, res) => {
     const { type, tmdbId } = req.params;
     const season = req.query.season;
@@ -414,7 +274,6 @@ app.get('/api/vixsrc/:type/:tmdbId', async (req, res) => {
     };
 
     try {
-        // Step 1: Get embed link from API
         const pageUrl = mediaType === 'movie'
             ? `${BASE_URL}/api/movie/${tmdbId}`
             : `${BASE_URL}/api/tv/${tmdbId}/${season}/${episode}`;
@@ -424,14 +283,12 @@ app.get('/api/vixsrc/:type/:tmdbId', async (req, res) => {
         const apiData = await apiRes.json();
         if (!apiData?.src) return res.json({ sources: [] });
 
-        // Step 2: Fetch embed page
         const htmlRes = await fetch(BASE_URL + apiData.src, {
             headers: { ...HEADERS, Accept: 'text/html,application/xhtml+xml,*/*' }
         });
         if (!htmlRes.ok) return res.status(500).json({ error: 'VixSrc embed failed' });
         const html = await htmlRes.text();
 
-        // Step 3: Extract token, expires, playlist URL
         const token = html.match(/token["']\s*:\s*["']([^"']+)/)?.[1];
         const expires = html.match(/expires["']\s*:\s*["']([^"']+)/)?.[1];
         const playlist = html.match(/url\s*:\s*["']([^"']+)/)?.[1];
@@ -441,20 +298,18 @@ app.get('/api/vixsrc/:type/:tmdbId', async (req, res) => {
         const sep = playlist.includes('?') ? '&' : '?';
         const masterUrl = `${playlist}${sep}token=${token}&expires=${expires}&h=1`;
 
-        // Step 4: Fetch HLS master playlist
         const plRes = await fetch(masterUrl, {
             headers: { ...HEADERS, Referer: pageUrl }
         });
         if (!plRes.ok) return res.status(500).json({ error: 'VixSrc playlist failed' });
         const playlistContent = await plRes.text();
 
-        // Step 5: Parse variants for quality info
         const regex = /#EXT-X-STREAM-INF:[^\n]*RESOLUTION=\d+x(\d+)[^\n]*\n([^\n]+)/g;
         let match;
         let bestResolution = 0;
         while ((match = regex.exec(playlistContent)) !== null) {
-            const res = parseInt(match[1], 10);
-            if (res > bestResolution) bestResolution = res;
+            const resVal = parseInt(match[1], 10);
+            if (resVal > bestResolution) bestResolution = resVal;
         }
 
         const sources = bestResolution > 0 ? [{
@@ -463,7 +318,6 @@ app.get('/api/vixsrc/:type/:tmdbId', async (req, res) => {
             type: 'hls'
         }] : [];
 
-        // Parse audio tracks
         const audioTracks = [];
         for (const line of playlistContent.split('\n')) {
             if (!line.startsWith('#EXT-X-MEDIA:TYPE=AUDIO')) continue;
@@ -479,72 +333,447 @@ app.get('/api/vixsrc/:type/:tmdbId', async (req, res) => {
     }
 });
 
-// Proxy endpoint for HLS streams
+// ── Movy.bz HLS Direct Stream Provider ─────────────────────────────────
+const MOVY_API = 'https://api.wecollege.net';
+const MOVY_SERVERS = [
+    'miami', 'phoenix', 'dallas', 'seattle', 'denver',
+    'cancun', 'atlanta', 'houston', 'portland', 'austin',
+    'munich', 'berlin', 'paris', 'delhi'
+];
+
+const MOVY_K = [
+    0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5,
+    0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5,
+    0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3,
+    0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174
+];
+const MOVY_MAGIC = [109, 118, 109, 49]; // "mvm1"
+const movyIsEven = (e) => ((e * (e + 1)) & 1) === 0;
+
+function movyMix(e) {
+    e >>>= 0;
+    e ^= e >>> 16;
+    e = Math.imul(e, 0x85ebca6b) >>> 0;
+    e ^= e >>> 13;
+    e = Math.imul(e, 0xc2b2ae35) >>> 0;
+    return (e ^= e >>> 16) >>> 0;
+}
+
+function movyShift(e, t) {
+    return ((e >>>= 0), 0 === (t &= 31)) ? e >>> 0 : ((e << t) | (e >>> (32 - t))) >>> 0;
+}
+
+function decodeMovyPayload(e, t, a) {
+    let r = (function (e) {
+        let t = e.replace(/-/g, '+').replace(/_/g, '/').padEnd(4 * Math.ceil(e.length / 4), '=');
+        return new Uint8Array(Buffer.from(t, 'base64'));
+    })(e);
+
+    let n = (function (e, t, a) {
+        let s = (function (e, t) {
+            let s = Array(61);
+            let r = movyMix(
+                (function (e) {
+                    let t = 0x811c9dc5;
+                    for (let a = 0; a < e.length; a++) t = Math.imul(t ^ e.charCodeAt(a), 0x1000193) >>> 0;
+                    return movyMix(t);
+                })(e) ^ movyMix((t >>> 0) ^ 0x9e3779b9)
+            ) >>> 0;
+
+            for (let e = 0; e < 8; e++) {
+                if (movyIsEven(e)) {
+                    let t = r % 61;
+                    r = movyShift((r + 0x9e3779b9) >>> 0, 7 + (7 & e));
+                    s[t] = (r ^ movyMix(r)) >>> 0;
+                    r = movyMix((r + t) >>> 0);
+                } else {
+                    s[e] = MOVY_K[15 & e];
+                }
+            }
+            return { S: s, acc: movyMix(0xa5a5a5a5 ^ r) >>> 0 };
+        })(e, t);
+
+        let r = new Uint8Array(a);
+        let n = 0;
+        for (let e = 0; e < a; ) {
+            let t = (function (e, t) {
+                let r = e.S;
+                let n = e.acc;
+                let i = n % 61;
+                let o = 0 - Number(i in r);
+                let l = r[i] >>> 0;
+                let c = Math.imul(0x9e3779b9, t + 1) >>> 0;
+                let h = ((((n ^ ((l ^ c) >>> 0)) >>> 0) | (n & ((l ^ c) >>> 0) & o)) >>> 0) >>> 0;
+                n = movyMix((movyShift((h + n) >>> 0, 31 & i) ^ movyShift(n, 31 & Math.imul(i, 7))) + 0x9e3779b9 >>> 0);
+                r[i] = n >>> 0;
+                e.acc = n;
+                return n >>> 0;
+            })(s, n++);
+            r[e++] = 255 & t;
+            if (e < a) r[e++] = (t >>> 8) & 255;
+            if (e < a) r[e++] = (t >>> 16) & 255;
+            if (e < a) r[e++] = (t >>> 24) & 255;
+        }
+        return r;
+    })(t, a, r.length);
+
+    for (let e = 0; e < r.length; e++) r[e] ^= n[e];
+    for (let e = 0; e < MOVY_MAGIC.length; e++) {
+        if (r[e] !== MOVY_MAGIC[e]) throw Error(`decrypt failed: bad seed or payload`);
+    }
+    return Buffer.from(r.subarray(MOVY_MAGIC.length)).toString('utf8');
+}
+
+const movySeedCache = new Map();
+const inflightSeedRequests = new Map();
+
+async function movyGetSeed(mediaId, forceRefresh = false) {
+    const key = String(mediaId);
+    const now = Date.now();
+
+    if (!forceRefresh) {
+        const cached = movySeedCache.get(key);
+        if (cached && cached.expiresAt - 4000 > now) {
+            return cached.seed;
+        }
+    }
+
+    if (inflightSeedRequests.has(key)) {
+        return await inflightSeedRequests.get(key);
+    }
+
+    const promise = (async () => {
+        try {
+            const r = await fetch(`${MOVY_API}/seed?mediaId=${mediaId}`, {
+                headers: {
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                    'Accept': 'application/json, text/plain, */*',
+                    'Referer': 'https://www.movy.bz/',
+                    'Origin': 'https://www.movy.bz'
+                },
+                signal: AbortSignal.timeout(5000)
+            });
+
+            if (r.ok) {
+                const data = await r.json();
+                const ttl = data.ttlMs || 30000;
+                movySeedCache.set(key, { seed: data.seed, expiresAt: Date.now() + ttl });
+                return data.seed;
+            }
+
+            if (r.status === 429) {
+                console.warn(`[Movy] 429 on seed for ${mediaId}, checking fallback`);
+                const cached = movySeedCache.get(key);
+                if (cached) return cached.seed;
+            }
+        } catch (e) {
+            const cached = movySeedCache.get(key);
+            if (cached) return cached.seed;
+            console.error(`[Movy] Seed error for ${mediaId}:`, e.message);
+        } finally {
+            inflightSeedRequests.delete(key);
+        }
+
+        return movySeedCache.get(key)?.seed || null;
+    })();
+
+    inflightSeedRequests.set(key, promise);
+    return await promise;
+}
+
+app.get('/api/movybz/:type/:tmdbId', async (req, res) => {
+    const { type, tmdbId } = req.params;
+    const mediaType = type === 'movie' ? 'movie' : 'tv';
+    const season = req.query.season || '1';
+    const episode = req.query.episode || '1';
+    let title = req.query.title || '';
+    let year = req.query.year || '';
+    let imdbId = req.query.imdbId || '';
+    let totalSeasons = req.query.totalSeasons || '1';
+    const numericTmdbId = parseInt(tmdbId, 10);
+
+    if (!title || !imdbId || !year) {
+        try {
+            const key = await ensureTmdbKey();
+            if (key) {
+                const tmdbRes = await fetch(`${TMDB_BASE}/${mediaType}/${numericTmdbId}?api_key=${key}&append_to_response=external_ids`, {
+                    headers: { 'User-Agent': 'Mozilla/5.0' },
+                    signal: AbortSignal.timeout(4000)
+                });
+                if (tmdbRes.ok) {
+                    const d = await tmdbRes.json();
+                    if (!title) title = d.title || d.name || '';
+                    if (!year) year = (d.release_date || d.first_air_date || '').split('-')[0] || '';
+                    if (!imdbId) imdbId = d.external_ids?.imdb_id || d.imdb_id || '';
+                    if (mediaType === 'tv' && d.number_of_seasons) totalSeasons = String(d.number_of_seasons);
+                }
+            }
+        } catch (err) {
+            console.warn('[Movy] TMDB metadata auto-enrich error:', err.message);
+        }
+    }
+
+    const headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Accept': 'application/json, text/plain, */*',
+        'Referer': 'https://www.movy.bz/',
+        'Origin': 'https://www.movy.bz'
+    };
+
+    let seed = await movyGetSeed(numericTmdbId);
+    if (!seed) {
+        return res.status(500).json({ error: 'Seed unavailable' });
+    }
+
+    const baseParams = {
+        title: title,
+        mediaType,
+        year: year,
+        tmdbId: String(numericTmdbId),
+        imdbId: imdbId,
+        enc: '2',
+        seed: seed
+    };
+
+    if (mediaType === 'tv') {
+        baseParams.totalSeasons = totalSeasons;
+        baseParams.seasonId = season;
+        baseParams.episodeId = episode;
+    }
+
+    for (const city of MOVY_SERVERS) {
+        try {
+            baseParams.seed = seed;
+            const params = new URLSearchParams(baseParams);
+            const r = await fetch(`${MOVY_API}/${city}/sources?${params.toString()}`, {
+                headers,
+                signal: AbortSignal.timeout(5000)
+            });
+
+            if (!r.ok) continue;
+
+            const encrypted = await r.text();
+            let decrypted;
+            try {
+                decrypted = decodeMovyPayload(encrypted, seed, numericTmdbId);
+            } catch {
+                seed = await movyGetSeed(numericTmdbId, true);
+                if (!seed) continue;
+                baseParams.seed = seed;
+                const retryParams = new URLSearchParams(baseParams);
+                const retryResp = await fetch(`${MOVY_API}/${city}/sources?${retryParams.toString()}`, {
+                    headers,
+                    signal: AbortSignal.timeout(5000)
+                });
+                if (!retryResp.ok) continue;
+                decrypted = decodeMovyPayload(await retryResp.text(), seed, numericTmdbId);
+            }
+
+            const data = JSON.parse(decrypted);
+            if (Array.isArray(data.sources) && data.sources.length > 0) {
+                const validSources = data.sources.filter(s => !(s.url || '').includes('.mpd'));
+                if (validSources.length === 0) continue;
+
+                const sources = [];
+                for (const s of validSources) {
+                    const isHls = s.url?.includes('.m3u8');
+                    const isMp4 = s.url?.includes('.mp4');
+                    const type = isHls ? 'hls' : isMp4 ? 'mp4' : 'hls';
+
+                    if (isHls) {
+                        try {
+                            const plRes = await fetch(s.url, {
+                                headers: {
+                                    'User-Agent': headers['User-Agent'],
+                                    'Referer': 'https://www.movy.bz/',
+                                    'Origin': 'https://www.movy.bz'
+                                },
+                                signal: AbortSignal.timeout(6000)
+                            });
+                            if (plRes.ok) {
+                                const playlist = await plRes.text();
+                                const variantRegex = /#EXT-X-STREAM-INF:[^\n]*BANDWIDTH=(\d+)[^\n]*RESOLUTION=(\d+x\d+)[^\n]*(?:FRAME-RATE=([\d.]+))?[^\n]*\n([^\n]+)/g;
+                                let match;
+                                const variants = [];
+                                while ((match = variantRegex.exec(playlist)) !== null) {
+                                    const resParts = match[2].split('x');
+                                    variants.push({
+                                        bandwidth: parseInt(match[1], 10),
+                                        width: parseInt(resParts[0], 10),
+                                        height: parseInt(resParts[1], 10),
+                                        frameRate: match[3] ? parseFloat(match[3]) : null,
+                                        uri: match[4]
+                                    });
+                                }
+
+                                if (variants.length > 0) {
+                                    variants.sort((a, b) => a.height - b.height);
+                                    for (const v of variants) {
+                                        const fullUrl = v.uri.startsWith('http')
+                                            ? v.uri
+                                            : new URL(v.uri, s.url).href;
+                                        sources.push({
+                                            url: fullUrl,
+                                            quality: `${v.height}p`,
+                                            type: 'hls',
+                                            width: v.width,
+                                            height: v.height,
+                                            bandwidth: v.bandwidth,
+                                            frameRate: v.frameRate
+                                        });
+                                    }
+                                } else {
+                                    sources.push({
+                                        url: s.url,
+                                        quality: s.quality || 'Auto',
+                                        type: 'hls'
+                                    });
+                                }
+                            } else {
+                                sources.push({
+                                    url: s.url,
+                                    quality: s.quality || 'Auto',
+                                    type: 'hls'
+                                });
+                            }
+                        } catch {
+                            sources.push({
+                                url: s.url,
+                                quality: s.quality || 'Auto',
+                                type: 'hls'
+                            });
+                        }
+                    } else {
+                        sources.push({
+                            url: s.url,
+                            quality: s.quality || 'Auto',
+                            type: isMp4 ? 'mp4' : 'hls'
+                        });
+                    }
+                }
+
+                return res.json({
+                    server: city,
+                    sources,
+                    subtitles: data.subtitles || []
+                });
+            }
+        } catch {
+            continue;
+        }
+    }
+
+    res.json({ sources: [], subtitles: [], error: 'No sources found from Movy servers' });
+});
+
+// ── Stream & Manifest Proxy ────────────────────────────────────────────
 app.get('/api/proxy', async (req, res) => {
     const targetUrl = req.query.url;
-    const referer = req.query.referer || targetUrl || 'https://vixsrc.to/';
+    let referer = req.query.referer || targetUrl || 'https://www.movy.bz/';
 
     if (!targetUrl) return res.status(400).json({ error: 'Missing url param' });
 
     try {
+        const parsedTarget = new URL(targetUrl);
+        const hostname = parsedTarget.hostname;
+
+        if (
+            hostname.includes('calmprism') ||
+            hostname.includes('peakstorm') ||
+            hostname.includes('wecollege') ||
+            hostname.includes('movy')
+        ) {
+            referer = 'https://www.movy.bz/';
+        } else if (hostname.includes('vixsrc')) {
+            referer = 'https://vixsrc.to/';
+        }
+
+        const requestHeaders = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'Referer': referer,
+            'Origin': new URL(referer).origin,
+            'Accept': '*/*'
+        };
+
+        if (req.headers.range) {
+            requestHeaders['Range'] = req.headers.range;
+        }
+
         const response = await fetch(targetUrl, {
-            headers: {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-                Referer: referer,
-                Origin: new URL(referer).origin
-            }
+            headers: requestHeaders
         });
 
-        if (!response.ok) return res.status(response.status).send('Proxy error');
+        if (!response.ok && response.status !== 206) {
+            return res.status(response.status).send(`Upstream CDN error: ${response.status}`);
+        }
 
         const contentType = response.headers.get('content-type') || '';
-        res.setHeader('Content-Type', contentType);
         res.setHeader('Access-Control-Allow-Origin', '*');
+        res.setHeader('Access-Control-Allow-Headers', '*');
+        res.setHeader('Access-Control-Allow-Methods', 'GET, HEAD, OPTIONS');
 
-        const isPlaylist = contentType.includes('m3u') || contentType.includes('text') || targetUrl.includes('.m3u8') || targetUrl.includes('playlist');
+        let buffer = Buffer.from(await response.arrayBuffer());
 
-        if (isPlaylist) {
-            const text = await response.text();
+        if (buffer.length >= 2 && buffer[0] === 0x1f && buffer[1] === 0x8b) {
+            try {
+                buffer = zlib.gunzipSync(buffer);
+            } catch {}
+        }
+
+        const firstChunk = buffer.slice(0, 30).toString('utf8');
+        const isPlaylist =
+            firstChunk.trim().startsWith('#EXTM3U') ||
+            contentType.includes('m3u') ||
+            contentType.includes('text') ||
+            targetUrl.includes('.m3u8');
+
+        if (isPlaylist && firstChunk.includes('#EXT')) {
+            res.setHeader('Content-Type', 'application/vnd.apple.mpegurl');
+            const rawText = buffer.toString('utf8');
             const base = new URL(targetUrl);
             const proxyBase = `${req.protocol}://${req.get('host')}`;
 
-            // Resolve every URL in the playlist through our proxy
-            const lines = text.split('\n');
-            let afterStreamInf = false;
-            const rewritten = lines.map(line => {
-                // Handle URI="..." patterns (keys, media, subtitles)
-                const rewrittenLine = line.replace(/URI="([^"]*)"/g, (match, url) => {
-                    if (url.startsWith('http') && !url.includes('vixsrc.to')) return match;
-                    const absolute = url.startsWith('http') ? url : new URL(url, base).href;
-                    const encoded = encodeURIComponent(absolute);
-                    const ref = encodeURIComponent(targetUrl);
-                    return `URI="${proxyBase}/api/proxy?url=${encoded}&referer=${ref}"`;
-                });
+            const lines = rawText.replace(/\r\n/g, '\n').replace(/\r/g, '\n').split('\n');
+            const rewritten = lines.map((line) => {
+                const trimmed = line.trim();
+                if (!trimmed) return line;
 
-                // Handle standalone URLs after #EXT-X-STREAM-INF
-                if (afterStreamInf && rewrittenLine.trim() && !rewrittenLine.startsWith('#')) {
-                    afterStreamInf = false;
-                    const url = rewrittenLine.trim();
-                    if (!url.startsWith(proxyBase)) {
-                        const absolute = url.startsWith('http') ? url : new URL(url, base).href;
-                        const encoded = encodeURIComponent(absolute);
-                        const ref = encodeURIComponent(targetUrl);
-                        return `${proxyBase}/api/proxy?url=${encoded}&referer=${ref}`;
-                    }
+                if (trimmed.startsWith('#')) {
+                    return trimmed.replace(/URI="([^"]+)"/g, (match, uri) => {
+                        try {
+                            const absolute = uri.startsWith('http') ? uri : new URL(uri, base).href;
+                            const proxyUrl = `${proxyBase}/api/proxy?url=${encodeURIComponent(absolute)}&referer=${encodeURIComponent(referer)}`;
+                            return `URI="${proxyUrl}"`;
+                        } catch (e) {
+                            return match;
+                        }
+                    });
                 }
 
-                afterStreamInf = rewrittenLine.startsWith('#EXT-X-STREAM-INF');
-                return rewrittenLine;
+                try {
+                    const absolute = trimmed.startsWith('http') ? trimmed : new URL(trimmed, base).href;
+                    return `${proxyBase}/api/proxy?url=${encodeURIComponent(absolute)}&referer=${encodeURIComponent(referer)}`;
+                } catch (e) {
+                    return line;
+                }
             }).join('\n');
 
-            res.send(rewritten);
+            return res.send(rewritten);
         } else {
-            const buffer = await response.arrayBuffer();
-            res.send(Buffer.from(buffer));
+            res.status(response.status);
+            if (contentType) res.setHeader('Content-Type', contentType);
+            const contentRange = response.headers.get('content-range');
+            if (contentRange) res.setHeader('Content-Range', contentRange);
+            const acceptRanges = response.headers.get('accept-ranges');
+            if (acceptRanges) res.setHeader('Accept-Ranges', acceptRanges);
+            const contentLength = response.headers.get('content-length');
+            if (contentLength) res.setHeader('Content-Length', contentLength);
+
+            return res.send(buffer);
         }
     } catch (error) {
         console.error('Proxy error:', error);
-        res.status(500).send('Proxy error');
+        res.status(500).send('Proxy stream error: ' + error.message);
     }
 });
 
@@ -552,66 +781,21 @@ app.get('/api/resolve', async (req, res) => {
     const { url } = req.query;
     if (!url) return res.status(400).json({ error: 'Missing url' });
     try {
+        let referer = 'https://embedmaster.link/';
+        if (url.includes('videasy.to')) referer = 'https://player.videasy.to/';
+        else if (url.includes('vidfast.pro')) referer = 'https://vidfast.pro/';
+        else if (url.includes('vidrock.ru')) referer = 'https://vidrock.ru/';
+
         const r = await fetch(url, {
             redirect: 'follow',
             headers: {
                 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-                Referer: 'https://embedmaster.link/',
+                Referer: referer,
             }
         });
         res.json({ finalUrl: r.url, status: r.status });
     } catch (e) {
         res.json({ finalUrl: url, error: e.message });
-    }
-});
-
-// Proxy the full embed page (option 1)
-app.get('/api/proxy/embed', async (req, res) => {
-    const { url } = req.query;
-    if (!url) return res.status(400).json({ error: 'Missing url' });
-    try {
-        const r = await fetch(url, {
-            redirect: 'follow',
-            headers: {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-                Referer: 'https://embedmaster.link/',
-                Origin: 'https://embedmaster.link',
-                Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-            }
-        });
-        const html = await r.text();
-        // Rewrite relative URLs to absolute via our proxy
-        const base = new URL(url);
-        const proxyBase = `${req.protocol}://${req.get('host')}`;
-        const rewritten = html
-            .replace(/(src|href)=(["'])\//g, (m, attr, q) => `${attr}=${q}${proxyBase}/api/proxy/asset?url=${encodeURIComponent(base.origin)}&path=`)
-            .replace(/(src|href)=(["'])(?!https?:\/\/)(?!\/\/)(?!data:)([^"']+)/g, (m, attr, q, path) => {
-                const absolute = new URL(path, url).href;
-                return `${attr}=${q}${proxyBase}/api/proxy/asset?url=${encodeURIComponent(absolute)}`;
-            });
-        res.set('Content-Type', 'text/html');
-        res.send(rewritten);
-    } catch (e) {
-        res.status(500).send('Proxy error: ' + e.message);
-    }
-});
-
-app.get('/api/proxy/asset', async (req, res) => {
-    const { url } = req.query;
-    if (!url) return res.status(400).json({ error: 'Missing url' });
-    try {
-        const r = await fetch(url, {
-            headers: {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-                Referer: 'https://embedmaster.link/',
-            }
-        });
-        const contentType = r.headers.get('content-type') || 'application/octet-stream';
-        res.set('Content-Type', contentType);
-        const buf = await r.arrayBuffer();
-        res.send(Buffer.from(buf));
-    } catch (e) {
-        res.status(500).send('Asset proxy error');
     }
 });
 

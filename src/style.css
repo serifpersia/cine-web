@@ -604,6 +604,11 @@ body {
   overflow: hidden;
   box-shadow: var(--shadow-xl);
   contain: layout style;
+  cursor: none;
+}
+
+.video-wrapper.show-controls {
+  cursor: default;
 }
 
 .video-wrapper::before {
@@ -646,7 +651,7 @@ body {
   cursor: pointer;
   pointer-events: none;
   opacity: 0;
-  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
   z-index: 10;
   backdrop-filter: blur(8px);
   -webkit-backdrop-filter: blur(8px);
@@ -693,16 +698,11 @@ body {
   flex-direction: column;
   opacity: 0;
   transform: translateY(10px);
-  transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+  transition:
+    opacity 0.25s ease,
+    transform 0.25s ease;
   pointer-events: none;
   z-index: 15;
-}
-
-.video-wrapper.show-controls .custom-controls,
-.video-wrapper:hover .custom-controls {
-  opacity: 1;
-  transform: translateY(0);
-  pointer-events: auto;
 }
 
 .progress-container {
